@@ -1252,6 +1252,10 @@
     <string name="permdesc_setWallpaperHints">Allows the application
         to set the system wallpaper size hints.</string>
 
+    <!-- Title of policy access to permit remote control -->
+    <string name="policylab_remoteControl">Permit remote control</string>
+    <!-- Description of policy access to permit remote control -->
+    <string name="policydesc_remoteControl">Permit this device to be remote controlled.</string>
     <!-- Title of an application permission, listed so the user can choose whether they want to allow the application to do this. -->
     <string name="permlab_masterClear">reset system to factory defaults</string>
     <!-- Description of an application permission, listed so the user can choose whether they want to allow the application to do this. -->

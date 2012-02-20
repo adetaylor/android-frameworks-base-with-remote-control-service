@@ -1,0 +1,459 @@
+<field name="USES_POLICY_REMOTE_CONTROL"
+ type="int"
+ transient="false"
+ volatile="false"
+ value="5"
+ static="true"
+ final="true"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<class name="RemoteControl"
+ extends="java.lang.Object"
+ abstract="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<method name="getDeviceInfo"
+ return="android.os.RemoteControl.DeviceInfo"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<exception name="RemoteControl.ServiceExitedException" type="android.os.RemoteControl.ServiceExitedException">
+</exception>
+</method>
+<method name="getFrameBuffer"
+ return="android.os.MemoryFile"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<parameter name="pixfmt" type="int">
+</parameter>
+<parameter name="persistent" type="boolean">
+</parameter>
+<exception name="RemoteControl.FrameBufferUnavailableException" type="android.os.RemoteControl.FrameBufferUnavailableException">
+</exception>
+<exception name="RemoteControl.ServiceExitedException" type="android.os.RemoteControl.ServiceExitedException">
+</exception>
+</method>
+<method name="getRemoteControl"
+ return="android.os.RemoteControl"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="true"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<parameter name="ctx" type="android.content.Context">
+</parameter>
+<parameter name="listener" type="android.os.RemoteControl.ICallbacks">
+</parameter>
+<exception name="SecurityException" type="java.lang.SecurityException">
+</exception>
+</method>
+<method name="grabScreen"
+ return="android.graphics.Region"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<parameter name="incremental" type="boolean">
+</parameter>
+<exception name="RemoteControl.DisconnectedException" type="android.os.RemoteControl.DisconnectedException">
+</exception>
+<exception name="RemoteControl.ServiceExitedException" type="android.os.RemoteControl.ServiceExitedException">
+</exception>
+</method>
+<method name="injectKeyEvent"
+ return="void"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<parameter name="ev" type="android.view.KeyEvent">
+</parameter>
+<exception name="RemoteControl.ServiceExitedException" type="android.os.RemoteControl.ServiceExitedException">
+</exception>
+</method>
+<method name="injectMotionEvent"
+ return="void"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<parameter name="ev" type="android.view.MotionEvent">
+</parameter>
+<exception name="RemoteControl.ServiceExitedException" type="android.os.RemoteControl.ServiceExitedException">
+</exception>
+</method>
+<method name="release"
+ return="void"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</method>
+<method name="releaseFrameBuffer"
+ return="void"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<exception name="RemoteControl.ServiceExitedException" type="android.os.RemoteControl.ServiceExitedException">
+</exception>
+</method>
+<field name="BIND_SERVICE_INTENT"
+ type="java.lang.String"
+ transient="false"
+ volatile="false"
+ value="&quot;com.android.remote.BIND&quot;"
+ static="true"
+ final="true"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="RC_DEVICE_ADMIN_NOT_ENABLED"
+ type="int"
+ transient="false"
+ volatile="false"
+ value="2"
+ static="true"
+ final="true"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="RC_DISCONNECTED"
+ type="int"
+ transient="false"
+ volatile="false"
+ value="4"
+ static="true"
+ final="true"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="RC_INCREMENTAL_UPDATES_UNAVAILABLE"
+ type="int"
+ transient="false"
+ volatile="false"
+ value="5"
+ static="true"
+ final="true"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="RC_PERMISSION_DENIED"
+ type="int"
+ transient="false"
+ volatile="false"
+ value="1"
+ static="true"
+ final="true"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="RC_SERVICE_UNAVAILABLE"
+ type="int"
+ transient="false"
+ volatile="false"
+ value="3"
+ static="true"
+ final="true"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="RC_SUCCESS"
+ type="int"
+ transient="false"
+ volatile="false"
+ value="0"
+ static="true"
+ final="true"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+</class>
+<class name="RemoteControl.DeviceInfo"
+ extends="java.lang.Object"
+ abstract="false"
+ static="true"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<implements name="android.os.Parcelable">
+</implements>
+<constructor name="RemoteControl.DeviceInfo"
+ type="android.os.RemoteControl.DeviceInfo"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</constructor>
+<method name="describeContents"
+ return="int"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</method>
+<method name="readFromParcel"
+ return="void"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<parameter name="in" type="android.os.Parcel">
+</parameter>
+</method>
+<method name="writeToParcel"
+ return="void"
+ abstract="false"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<parameter name="out" type="android.os.Parcel">
+</parameter>
+<parameter name="flags" type="int">
+</parameter>
+</method>
+<field name="CREATOR"
+ type="android.os.Parcelable.Creator"
+ transient="false"
+ volatile="false"
+ static="true"
+ final="true"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="displayOrientation"
+ type="int"
+ transient="false"
+ volatile="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="fbHeight"
+ type="int"
+ transient="false"
+ volatile="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="fbPixelFormat"
+ type="int"
+ transient="false"
+ volatile="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+<field name="fbWidth"
+ type="int"
+ transient="false"
+ volatile="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</field>
+</class>
+<class name="RemoteControl.DisconnectedException"
+ extends="android.os.RemoteControl.RemoteControlException"
+ abstract="false"
+ static="true"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<constructor name="RemoteControl.DisconnectedException"
+ type="android.os.RemoteControl.DisconnectedException"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</constructor>
+</class>
+<class name="RemoteControl.FrameBufferUnavailableException"
+ extends="android.os.RemoteControl.RemoteControlException"
+ abstract="false"
+ static="true"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<constructor name="RemoteControl.FrameBufferUnavailableException"
+ type="android.os.RemoteControl.FrameBufferUnavailableException"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</constructor>
+</class>
+<interface name="RemoteControl.ICallbacks"
+ abstract="true"
+ static="true"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<method name="connectionStatus"
+ return="void"
+ abstract="true"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<parameter name="status" type="int">
+</parameter>
+</method>
+<method name="deviceInfoChanged"
+ return="void"
+ abstract="true"
+ native="false"
+ synchronized="false"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</method>
+</interface>
+<class name="RemoteControl.IncrementalUpdatesUnavailableException"
+ extends="android.os.RemoteControl.RemoteControlException"
+ abstract="false"
+ static="true"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<constructor name="RemoteControl.IncrementalUpdatesUnavailableException"
+ type="android.os.RemoteControl.IncrementalUpdatesUnavailableException"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</constructor>
+</class>
+<class name="RemoteControl.RemoteControlException"
+ extends="java.lang.Exception"
+ abstract="false"
+ static="true"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<constructor name="RemoteControl.RemoteControlException"
+ type="android.os.RemoteControl.RemoteControlException"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</constructor>
+</class>
+<class name="RemoteControl.ServiceExitedException"
+ extends="android.os.RemoteControl.RemoteControlException"
+ abstract="false"
+ static="true"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<constructor name="RemoteControl.ServiceExitedException"
+ type="android.os.RemoteControl.ServiceExitedException"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</constructor>
+</class>
+<class name="RemoteControl.ServiceUnavailableException"
+ extends="android.os.RemoteControl.RemoteControlException"
+ abstract="false"
+ static="true"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+<constructor name="RemoteControl.ServiceUnavailableException"
+ type="android.os.RemoteControl.ServiceUnavailableException"
+ static="false"
+ final="false"
+ deprecated="not deprecated"
+ visibility="public"
+>
+</constructor>
+</class>
