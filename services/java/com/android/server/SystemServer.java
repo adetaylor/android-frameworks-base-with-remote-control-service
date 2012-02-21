@@ -548,6 +548,13 @@ class ServerThread extends Thread {
             }
 
             try {
+                Slog.i(TAG, "RemoteControlService");
+                remote = new RemoteControlService(context);
+            } catch (Throwable e) {
+                reportWtf("starting RemoteControlService service", e);
+            }
+
+            try {
                 Slog.i(TAG, "NetworkTimeUpdateService");
                 networkTimeUpdater = new NetworkTimeUpdateService(context);
             } catch (Throwable e) {
