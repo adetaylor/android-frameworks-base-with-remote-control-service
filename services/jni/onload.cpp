@@ -9,7 +9,6 @@
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
-int register_android_server_RemoteControlService(JNIEnv* env);
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
@@ -33,7 +32,7 @@ int register_android_server_UsbHostManager(JNIEnv* env);
 int register_android_server_VibratorService(JNIEnv* env);
 int register_android_server_SystemServer(JNIEnv* env);
 int register_android_server_location_GpsLocationProvider(JNIEnv* env);
-    register_android_server_RemoteControlService(env);
+int register_android_server_RemoteControlService(JNIEnv* env);
 int register_android_server_connectivity_Vpn(JNIEnv* env);
 };
 
@@ -62,6 +61,7 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved)
     register_android_server_VibratorService(env);
     register_android_server_SystemServer(env);
     register_android_server_location_GpsLocationProvider(env);
+    register_android_server_RemoteControlService(env);
     register_android_server_connectivity_Vpn(env);
 
     return JNI_VERSION_1_4;

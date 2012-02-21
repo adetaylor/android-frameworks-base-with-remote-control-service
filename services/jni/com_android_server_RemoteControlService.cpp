@@ -164,18 +164,8 @@ static JNINativeMethod method_table[] = {
     { "nFillInFrameBufferMetrics", "(Landroid/os/RemoteControl$DeviceInfo;)V", (void*)fillInFrameBufferMetrics },
 };
 
-};
-
-jint JNI_OnLoad(JavaVM *vm, void *reserved)
+jint register_android_server_RemoteControlService(JNIEnv *env)
 {
-    void *env_;
-    JNIEnv *env;
-
-    if (vm->GetEnv(&env_, JNI_VERSION_1_4) != JNI_OK) {
-        LOGE("ERROR: GetEnv failed");
-        return -1;
-    }
-    env = (JNIEnv *)env_;
     jclass clazz = env->FindClass("com/realvnc/android/remote/RemoteControlService$RemoteControlClient");
 
     int res = env->RegisterNatives(clazz,
@@ -215,3 +205,5 @@ jint JNI_OnLoad(JavaVM *vm, void *reserved)
 
     return JNI_VERSION_1_4;
 }
+
+};
