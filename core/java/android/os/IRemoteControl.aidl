@@ -18,6 +18,7 @@ package android.os;
 
 import android.os.IRemoteControlClient;
 import android.os.RemoteControl;
+import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
@@ -29,7 +30,10 @@ interface IRemoteControl
     int registerRemoteController(IRemoteControlClient obj);
     void unregisterRemoteController(IRemoteControlClient obj);
 
-    RemoteControl.DeviceInfo getDeviceInfo(IRemoteControlClient obj);
+    RemoteControl.DeviceInfo getDeviceInfo(IRemoteControlClient client);
+
+    int registerRemoteController(IRemoteControlClient client);
+    void unregisterRemoteController(IRemoteControlClient client);
 
     void injectKeyEvent(IRemoteControlClient obj, in KeyEvent event);
     void injectMotionEvent(IRemoteControlClient obj, in MotionEvent event);
@@ -46,4 +50,13 @@ interface IRemoteControl
     void releaseFrameBuffer(IRemoteControlClient obj);
 
     int grabScreen(IRemoteControlClient obj, boolean incremental);
+
+    /* No longer used. Kept in here to maintain compatibility with older
+     * versions of the RemoteControlService available in certain Android
+     * OEM phones. */
+    boolean verifyPermissions();
+
+    Bundle customRequest(String extensionName, in Bundle payload);
+
+    Bundle customClientRequest(IRemoteControlClient client, String extensionName, in Bundle payload);
 }

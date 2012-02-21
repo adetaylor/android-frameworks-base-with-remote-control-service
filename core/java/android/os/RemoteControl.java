@@ -19,6 +19,7 @@ import android.os.Parcel;
 import android.os.Parcelable;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
@@ -30,7 +31,7 @@ import android.os.IRemoteControlClient;
  * be used for taking screenshots, or for implementing VNC servers or
  * other remote control applications.
  *
- * <p>To start using remote control, call {@link #getRemoteControl(Context, ICallbacks)}
+ * <p>To start using remote control, call {@link #getRemoteControl(Context)}
  * to create a RemoteControl object.</p>
  *
  * <p>To use this class, the user must explicitly authorise your
@@ -90,12 +91,22 @@ public class RemoteControl
      */
     public static class IncrementalUpdatesUnavailableException extends RemoteControlException {}
 
+    /**
+     * Class returned with details of the memory area.
+     */
+    public static interface MemoryAreaInformation {
+        public ParcelFileDescriptor getParcelFd();
+        public int getSize();
+    }
+
     public static final int RC_SUCCESS = 0;
     public static final int RC_PERMISSION_DENIED = 1;
     public static final int RC_DEVICE_ADMIN_NOT_ENABLED = 2;
     public static final int RC_SERVICE_UNAVAILABLE = 3;
     public static final int RC_DISCONNECTED = 4;
     public static final int RC_INCREMENTAL_UPDATES_UNAVAILABLE = 5;
+    public static final int RC_SERVICE_ITSELF_LACKING_PERMISSIONS = 6;
+    public static final int RC_SERVICE_LACKING_OTHER_OS_FACILITIES = 7;
 
     /**
      * Callbacks from the RemoteControl object to its listener.
@@ -152,7 +163,7 @@ public class RemoteControl
     /**
      * {@hide}
      */
-    private RemoteControl(Context ctx, ICallbacks listener) {
+    private RemoteControl(Context ctx, ICallbacks listener) throws RemoteControlException {
         mCallbackHandler = new CallbackHandler();
         mCallbackHandler.mListener = listener;
 
@@ -164,6 +175,7 @@ public class RemoteControl
                             mServiceConnection,
                             Context.BIND_AUTO_CREATE)) {
             mCtx.unbindService(mServiceConnection);
+            mServiceConnection = null;
             mCallbackHandler.mListener.connectionStatus(RC_SERVICE_UNAVAILABLE);
         }
     }
@@ -174,29 +186,54 @@ public class RemoteControl
 
     private class RemoteControlServiceConnection implements ServiceConnection {
 
-        public void onServiceConnected(ComponentName name, IBinder service) {
-            mServiceInterface = IRemoteControl.Stub.asInterface(service);
+        public void onServiceConnected(ComponentName name, final IBinder service) {
+            // This is called from the main thread of the app, but we want to immediately
+            // call registerRemoteController.
+            // Doing that in the main thread is probably a mistake, since it could
+            // take a long time (waiting for the user to respond to prompts, etc.)
+            // So let's create a thread for it.
+            Thread t = new Thread(new Runnable() {
 
-            int rv;
+                @Override
+                public void run() {
+                    IRemoteControl newServiceInterface = IRemoteControl.Stub.asInterface(service);
 
-            try {
-                rv = mServiceInterface.registerRemoteController(mCallbackHandler);
-            } catch(SecurityException e) {
-                rv = RC_PERMISSION_DENIED;
-            } catch(RemoteException e) {
-                rv = RC_SERVICE_UNAVAILABLE;
-            }
+                    int rv;
 
-            if(rv != RC_SUCCESS) {
-                mCtx.unbindService(mServiceConnection);
-                mServiceConnection = null;
-            }
+                    try {
+                        // This takes a long time, because it probably prompts the user,
+                        // hence we don't do it in our main thread.
+                        rv = newServiceInterface.registerRemoteController(mCallbackHandler);
+                    } catch(SecurityException e) {
+                        rv = RC_PERMISSION_DENIED;
+                    } catch(RemoteException e) {
+                        rv = RC_SERVICE_UNAVAILABLE;
+                    }
 
-            mCallbackHandler.mListener.connectionStatus(rv);
+                    synchronized (RemoteControl.this) {
+                        if(rv == RC_SUCCESS)
+                            mServiceInterface = newServiceInterface;
+                        else {
+                            try {
+                                mCtx.unbindService(mServiceConnection);
+                                mServiceConnection = null;
+                            } catch (IllegalArgumentException e) {
+                                // The service has been unbound by some
+                                // other thread
+                            }
+                        }
+
+                        if (mCallbackHandler != null)
+                            mCallbackHandler.mListener.connectionStatus(rv);
+                    }
+                }}, "RC registration thread");
+            t.start();
         }
 
         public void onServiceDisconnected(ComponentName name) {
-            mServiceInterface = null;
+            synchronized (RemoteControl.this) {
+                mServiceInterface = null;
+            }
         }
     }
 
@@ -220,19 +257,49 @@ public class RemoteControl
          * the client can avoid reading fields that aren't there, by
          * checking the version number. */
 
-        private static final int VERSION = 1;
+        private static final int VERSION = 2;
 
         /**
-         * Width of the frame buffer in pixels. This never changes,
-         * even if the device is rotated - in this case,
+         * Width of the display in pixels.
+         *
+         * This is the width of the display used to show the user
+         * interface, it does not indicate the width of the captured
+         * framebuffer. For example some devices will use a
+         * framebuffer which is larger than this, only drawing to and
+         * displaying an area of the framebuffer with width equal to
+         * the value of this member.
+         *
+         * To get the width of the captured framebuffer use
+         * frameBufferWidth if it's available.
+         *
+         * For compatibility reasons this member is still called fbWidth
+         * even though it represents the display width.
+         *
+         * This never changes, even if the device is rotated - in this case,
          * displayOrientation will change, but the width and height
          * will still reflect the native framebuffer orientation.
          */
         public int fbWidth;
 
         /**
-         * Height of the frame buffer in pixels. Never changes - see
-         * fbWidth.
+         * Height of the display in pixels.
+         *
+         * This is the height of the display used to show the user
+         * interface, it does not indicate the height of the captured
+         * framebuffer. For example some devices will use a
+         * framebuffer which is larger than this, only drawing to and
+         * displaying an area of the framebuffer with height equal to
+         * the value of this member.
+         *
+         * To get the height of the captured framebuffer use
+         * frameBufferHeight if it's available.
+         *
+         * For compatibily reasons this member is still called fbHeight
+         * even though it represents the display height.
+         *
+         * This never changes, even if the device is rotated - in this case,
+         * displayOrientation will change, but the width and height
+         * will still reflect the native framebuffer orientation.
          */
         public int fbHeight;
 
@@ -248,6 +315,64 @@ public class RemoteControl
          * 90 degree rotation.
          */
         public int displayOrientation;
+
+        /**
+         * Current frameBuffer width in pixels or -1 if unknown.
+         *
+         * This represents the actual width of the current capture of
+         * the framebuffer. This can be different from the width of
+         * the device display for various reasons. For example, some
+         * devices have a framebuffer larger than the display
+         * dimensions, with the extra pixels in the framebuffer being
+         * unused and never shown to the user.
+         *
+         * If the display width is required then fbWidth should be
+         * used instead.
+         *
+         * Only valid in version 2 or greater.
+         */
+        public int frameBufferWidth;
+
+        /**
+         * Current frameBuffer height in pixels or -1 if unknown.
+         *
+         * This represents the actual height of the current capture of
+         * the framebuffer. This can be different from the height of
+         * the device display for various reasons. For example, some
+         * devices have a framebuffer larger than the display
+         * dimensions, with the extra pixels in the framebuffer being
+         * unused and never shown to the user.
+         *
+         * If the display height is required then fbHeight should be
+         * used instead.
+         *
+         * Only valid in version 2 or greater.
+         */
+        public int frameBufferHeight;
+
+        /**
+         * Current pixel format using values defined in
+         * android.graphics.PixelFormat. Will be set to
+         * android.graphics.PixelFormat.UNKNOWN if unknown.
+         *
+         * Only valid in version 2 or greater.
+         */
+        public int frameBufferFormat;
+
+        /**
+         * Current stride in pixels between rows in frameBuffers
+         * or -1 if unknown.
+         *
+         * Only valid in version 2 or greater.
+         */
+        public int frameBufferStride;
+
+        /**
+         * Current frameBuffer size in bytes or -1 if unknown.
+         *
+         * Only valid in version 2 or greater.
+         */
+        public int frameBufferSize;
 
         public DeviceInfo() {
         }
@@ -278,6 +403,11 @@ public class RemoteControl
             out.writeInt(fbHeight);
             out.writeInt(fbPixelFormat);
             out.writeInt(displayOrientation);
+            out.writeInt(frameBufferWidth);
+            out.writeInt(frameBufferHeight);
+            out.writeInt(frameBufferFormat);
+            out.writeInt(frameBufferStride);
+            out.writeInt(frameBufferSize);
         }
 
         public void readFromParcel(Parcel in) {
@@ -289,16 +419,21 @@ public class RemoteControl
             fbPixelFormat = in.readInt();
             displayOrientation = in.readInt();
 
-            /* Hypothetical code for future extension:
-
             if(version >= 2) {
-                newParameter1 = in.readInt();
-                newParameter2 = in.readInt();
+                frameBufferWidth = in.readInt();
+                frameBufferHeight = in.readInt();
+                frameBufferFormat = in.readInt();
+                frameBufferStride = in.readInt();
+                frameBufferSize = in.readInt();
             } else {
-                newParameter1 = <sensible default>;
-                newParameter2 = <sensible default>;
+                frameBufferWidth = -1;
+                frameBufferHeight = -1;
+                frameBufferFormat = android.graphics.PixelFormat.UNKNOWN;
+                frameBufferStride = -1;
+                frameBufferSize = -1;
             }
 
+            /* Hypothetical code for future extension:
             if(version >= 3) {
                 newParameter3 = in.readInt();
             } else {
@@ -314,6 +449,10 @@ public class RemoteControl
      * throw a {@link java.lang.SecurityException} if the caller is
      * not allowed to use remote control.
      *
+     * Note that the resulting object is not ready for use until
+     * you have received {@link ICallbacks#connectionStatus(int)}
+     * with a value of {@link #RC_SUCCESS}.
+     *
      * @param listener Object implementing the {@link ICallbacks}
      * interface which will receive notification of device
      * configuration changes.
@@ -327,17 +466,45 @@ public class RemoteControl
      * service is not present.
      */
     public static RemoteControl getRemoteControl(Context ctx, ICallbacks listener)
-        throws SecurityException {
+        throws RemoteControlException, SecurityException {
         return new RemoteControl(ctx, listener);
     }
+
+    /**
+     * Discover if the remote control service is available.
+     *
+     * This does not attempt to authorize the caller
+     * with the remote control service and should only be
+     * used to determine if a remote control service is
+     * available.
+     *
+     * @return true if a remote control service is available, false otherwise.
+     */
+    public static boolean serviceAvailable(Context ctx) {
+        boolean ret = false;
+        try {
+            Intent i = new Intent(BIND_SERVICE_INTENT);
+            ComponentName cn = ctx.startService(i);
+            if(cn != null) {
+                ret = true;
+                /* Need to explicitly ask the service to be stopped, otherwise it'll
+                 * hang around forever. */
+                ctx.stopService(i);
+            }
+        } catch (SecurityException e) {
+            /* Ignore security exceptions as they will cause false to be returned */
+        }
+        return ret;
+    }
+
 
     /**
      * Stop using the remote control service. Call this method when
      * the {@link RemoteControl} object is no longer required.
      */
-    public void release() {
+    public synchronized void release() {
 
-        if(mServiceInterface != null) {
+        if(mServiceInterface != null && mCallbackHandler != null) {
             try {
                 mServiceInterface.unregisterRemoteController(mCallbackHandler);
             } catch(IllegalStateException e) {
@@ -364,8 +531,8 @@ public class RemoteControl
     }
 
     /**
-     * If the application leaks a RemoteControl object, shut down the
-     * binder interface cleanly.
+     * If the application leaks a reference to a RemoteControl object,
+     * shut down the binder interface cleanly.
      *
      * Note that there is no guarantee that this object will ever be
      * garbage collected, so it's not certain that this will run in
@@ -373,18 +540,46 @@ public class RemoteControl
      * cleanly, call {@link #release()}. */
     protected void finalize() throws Throwable {
         try {
-            if(mServiceConnection != null)
-                release();
+            release();
         } finally {
             super.finalize();
         }
     }
 
     /**
+     * Method to return an {@link IRemoteControl} which is guaranteed
+     * not to be null. This is used by all the methods which wish to communicate
+     * with the RemoteControlService backend. It's intended to be lock-free
+     * just to make sure there's no locking overhead incurred in methods
+     * which need to be high performance such as {@link #grabScreen(boolean)}.
+     * @return An IRemoteControl to talk to the service
+     */
+    private IRemoteControl getServiceInterface() throws ServiceExitedException {
+        IRemoteControl serviceInterface = mServiceInterface;
+        if (serviceInterface == null)
+            throw new ServiceExitedException();
+        return serviceInterface;
+    }
+
+    /**
+     * Method to return a {@link CallbackHandler} which is guaranteed
+     * not to be null. It's intended to be lock-free
+     * just to make sure there's no locking overhead incurred in methods
+     * which need to be high performance such as {@link #grabScreen(boolean)}.
+     * @return A CallbackHandler for the current interface.
+     */
+    private CallbackHandler getCallbackHandler() throws ServiceExitedException {
+        CallbackHandler callbackHandler = mCallbackHandler;
+        if (callbackHandler == null)
+            throw new ServiceExitedException();
+        return callbackHandler;
+    }
+
+    /**
      * Return the current device parameters such as screen resolution,
      * flip mode etc. The {@link
-     * RemoteControl.ICallbacks#deviceInfoChanged()} callback
-     * indicates that this information may have changed.
+     * RemoteControl.ICallbacks#deviceInfoChanged(DeviceInfo)}
+     * callback indicates that this information may have changed.
      *
      * @return a {@link RemoteControl.DeviceInfo} object.
      *
@@ -393,12 +588,8 @@ public class RemoteControl
      */
     public DeviceInfo getDeviceInfo() throws ServiceExitedException {
         DeviceInfo di;
-
-        if(mServiceInterface == null)
-            throw new ServiceExitedException();
-
         try {
-            mDeviceInfo = mServiceInterface.getDeviceInfo(mCallbackHandler);
+            mDeviceInfo = getServiceInterface().getDeviceInfo(getCallbackHandler());
             return mDeviceInfo;
         } catch(RemoteException e) {
             throw new ServiceExitedException();
@@ -406,7 +597,9 @@ public class RemoteControl
     }
 
     /**
-     * Ask for access to the contents of the screen.
+     * A wrapper around {@link #grabFrameBufferFd(int, boolean)} that
+     * instead returns a {@link android.os.MemoryFile} with
+     * the use of reflection.
      *
      * <p>The returned {@link android.os.MemoryFile MemoryFile} is
      * shared with the graphics subsystem. The {@link
@@ -437,41 +630,88 @@ public class RemoteControl
      *
      * @throws ServiceExitedException if it was not possible to
      * contact the remote control service.
+     *
+     * @deprecated This should no longer be used as it is not compatible
+     * with Ice Cream Sandwich. Use {@link #grabFrameBufferFd(int, boolean)} instead.
      */
     public MemoryFile getFrameBuffer(int pixfmt, boolean persistent) throws FrameBufferUnavailableException, ServiceExitedException {
+        MemoryAreaInformation mai = getFrameBufferFd(pixfmt, persistent);
+
+        return new MemoryFile(mai.getParcelFd().getFileDescriptor(),
+                              mai.getSize(),
+                              "r");
+    }
+
+    /**
+     * Ask for access to the contents of the screen.
+     *
+     * <p>The returned {@link MemoryAreaInformation} represents the
+     * {@link android.os.MemoryFile MemoryFile} that is
+     * shared with the graphics subsystem. The {@link
+     * #grabScreen(boolean)} method causes it to be updated with the
+     * current frame buffer contents as a bitmap. </p>
+     *
+     * <p>You can only have one shared frame buffer at a time.</p>
+     *
+     * @param pixfmt Requested pixel format. One of the constants from
+     * android.graphics.PixelFormat. {@link
+     * FrameBufferUnavailableException} will be thrown if the
+     * requested pixel format cannot be provided by the service.
+     *
+     * @param persistent If false, this function returns a single
+     * snapshot of the current contents of the screen. Use this for
+     * taking screenshots. If true, the contents of the returned
+     * object need to be updated as the screen changes, by calling
+     * {@link #grabScreen(boolean)}. In this case you will need to
+     * call {@link #releaseFrameBuffer()} when you are finished
+     * reading the screen. This case is intended for VNC servers or
+     * other remote control applications.
+     *
+     * @return A MemoryAreaInformation object with the details
+     * of the {@link android.os.MemoryFile} object that contains the
+     * contents of the frame buffer.
+     *
+     * @throws FrameBufferUnavailableException An error occurred while
+     * attempting to create the shared frame buffer.
+     *
+     * @throws ServiceExitedException if it was not possible to
+     * contact the remote control service.
+     */
+    public MemoryAreaInformation getFrameBufferFd(int pixfmt, boolean persistent) throws FrameBufferUnavailableException, ServiceExitedException {
         android.os.Parcel data = android.os.Parcel.obtain();
         android.os.Parcel reply = android.os.Parcel.obtain();
 
-        if(mServiceInterface == null)
-            throw new ServiceExitedException();
+        IRemoteControl serviceInterface = getServiceInterface();
+        CallbackHandler callbackHandler = getCallbackHandler();
 
         try {
             data.writeInterfaceToken("android.os.IRemoteControl");
-            data.writeStrongBinder(mCallbackHandler.asBinder());
+            data.writeStrongBinder(callbackHandler.asBinder());
             data.writeInt(pixfmt);
-            mServiceInterface.asBinder().transact(TRANSACTION_getFrameBuffer, data, reply, 0);
+            serviceInterface.asBinder().transact(TRANSACTION_getFrameBuffer, data, reply, 0);
 
             int rv = reply.readInt();
             if(rv == 0) {
-                ParcelFileDescriptor pfd = reply.readFileDescriptor();
+                final ParcelFileDescriptor pfd = reply.readFileDescriptor();
+                final int size = reply.readInt();
 
-                MemoryFile buff = new MemoryFile(pfd.getFileDescriptor(),
-                                                 reply.readInt(), "r");
+                MemoryAreaInformation mai = new MemoryAreaInformation() {
+                    public ParcelFileDescriptor getParcelFd() { return pfd; }
+                    public int getSize() { return size; }
+                };
 
-                mServiceInterface.grabScreen(mCallbackHandler, false);
+                serviceInterface.grabScreen(callbackHandler, false);
 
                 if(!persistent) {
-                    mServiceInterface.releaseFrameBuffer(mCallbackHandler);
+                    serviceInterface.releaseFrameBuffer(callbackHandler);
                 }
 
-                return buff;
+                return mai;
             } else {
                 throw new FrameBufferUnavailableException();
             }
         } catch(RemoteException e) {
             throw new ServiceExitedException();
-        } catch(IOException e) {
-            throw new FrameBufferUnavailableException();
         } finally {
             reply.recycle();
             data.recycle();
@@ -493,12 +733,8 @@ public class RemoteControl
      * contact the remote control service.
      */
     public void releaseFrameBuffer() throws ServiceExitedException {
-
-        if(mServiceInterface == null)
-            throw new ServiceExitedException();
-
         try {
-            mServiceInterface.releaseFrameBuffer(mCallbackHandler);
+            getServiceInterface().releaseFrameBuffer(getCallbackHandler());
         } catch(RemoteException e) {
             throw new ServiceExitedException();
         }
@@ -511,12 +747,33 @@ public class RemoteControl
      * This function can either grab the screen immediately, or it
      * can wait for a region to be updated before grabbing.
      *
-     * In both cases, the returned {@link android.graphics.Region}
+     * In both cases, the {@link android.graphics.Rect} 'changed'
      * describes which areas of the frame buffer have been updated.
+     *
+     * Previous versions of this function dealt in terms of
+     * {@link android.graphics.Region}} instead of
+     * {@link android.graphics.Rect}}. In order to avoid having to allocate
+     * memory for every single screen grab, we now deal using a single
+     * Rect. In practice, this has no performance impact because
+     * we never passed the Region across the IPC boundary to the
+     * RemoteControlService, so it never got the opportunity to make
+     * more sophisticated use of the Region than just to set a single
+     * rectangle. If, in future, the Surface Flinger is able to give
+     * us an accurate view of exactly what region has changed, we either
+     * need to revert this API to using regions, or just accept that
+     * we're going to take the bounding rect of the region.
      *
      * @param incremental If false, this call captures the entire
      * screen and returns immediately. If true, the function blocks if
      * necessary until a change occurs.
+     *
+     * @param changed A rectangle which, after the function returns, will
+     * contain the area of the screen which has changed. This will
+     * always be cleared and set to the actual changed area. We pass
+     * it as a parameter instead of returning it, in order to avoid
+     * necessitating memory allocations for every single grabScreen.
+     * The caller should typically maintain a single Rect which
+     * is passed for each call to grabScreen.
      *
      * @throws DisconnectedException Another thread called {@link
      * #releaseFrameBuffer} while this function was waiting for a
@@ -524,25 +781,34 @@ public class RemoteControl
      *
      * @throws ServiceExitedException if it was not possible to
      * contact the remote control service.
+     *
+     * @throws IncrementalUpdatesUnavailableException if an
+     * incremental update was requested from an implementation that
+     * doesn't support them.
      */
-    public Region grabScreen(boolean incremental) throws DisconnectedException, ServiceExitedException {
+    public void grabScreen(boolean incremental, Rect changedRect)
+        throws DisconnectedException, ServiceExitedException, IncrementalUpdatesUnavailableException {
         int rv = 0;
-        Region ret = new Region();
-
-        if(mServiceInterface == null)
-            throw new ServiceExitedException();
 
         try {
-            rv = mServiceInterface.grabScreen(mCallbackHandler, incremental);
-            ret.set(0, 0, mDeviceInfo.fbWidth, mDeviceInfo.fbHeight);
+            rv = getServiceInterface().grabScreen(getCallbackHandler(), incremental);
+            // Deal with older and newer versions of the DeviceInfo structure
+            int w = mDeviceInfo.frameBufferWidth;
+            if (w == -1)
+                w = mDeviceInfo.fbWidth;
+            int h = mDeviceInfo.frameBufferHeight;
+            if (h == -1)
+                h = mDeviceInfo.fbHeight;
+            changedRect.set(0, 0, w, h);
         } catch(RemoteException e) {
             throw new ServiceExitedException();
         }
         if(rv != 0) {
-            throw new DisconnectedException();
+            if(rv == RC_INCREMENTAL_UPDATES_UNAVAILABLE)
+                throw new IncrementalUpdatesUnavailableException();
+            else
+                throw new DisconnectedException();
         }
-
-        return ret;
     }
 
     /**
@@ -554,12 +820,8 @@ public class RemoteControl
      * contact the remote control service.
      */
     public void injectKeyEvent(KeyEvent ev) throws ServiceExitedException {
-
-        if(mServiceInterface == null)
-            throw new ServiceExitedException();
-
         try {
-            mServiceInterface.injectKeyEvent(mCallbackHandler, ev);
+            getServiceInterface().injectKeyEvent(getCallbackHandler(), ev);
         } catch(RemoteException e) {
             throw new ServiceExitedException();
         }
@@ -574,12 +836,96 @@ public class RemoteControl
      * contact the remote control service.
      */
     public void injectMotionEvent(MotionEvent ev) throws ServiceExitedException {
-
-        if(mServiceInterface == null)
-            throw new ServiceExitedException();
-
         try {
-            mServiceInterface.injectMotionEvent(mCallbackHandler, ev);
+            getServiceInterface().injectMotionEvent(getCallbackHandler(), ev);
+        } catch(RemoteException e) {
+            throw new ServiceExitedException();
+        }
+    }
+
+    /**
+     * @deprecated Used to check that the RemoteControlService had the required
+     * permissions to control the phone, but this is now done upon connection
+     * to the RemoteControlService. So, you wouldn't have been able to call
+     * this method even if you wanted to - because you'd never get a valid
+     * RemoteControl object on which to call it.
+     */
+    public boolean verifyPermissions() throws ServiceExitedException {
+        return true;
+    }
+
+    /**
+     * Sends a custom request to the RemoteControlService. This can be used
+     * to make requests which are understood by certain OEM versions of the RemoteControlService
+     * but not by others.
+     *
+     * Extension names should be in standard Java reverse-DNS notation, for example
+     * "com.myandroidoem.EnablePhaseTractorBeams".
+     *
+     * RemoteControlService implementations must ignore any 'extensionType' which they
+     * don't understand, and return a null Bundle. The corrollary is that
+     * any RemoteControlService which <em>does</em> understand a certain request should
+     * probably return a non-null Bundle, so that the caller can recognise that
+     * the request has been processed.
+     *
+     * Examples of usage might be:
+     * <ul>
+     * <li>A certain Android OEM has two screens on their phone, and a request could be sent
+     *     to switch remote control from one screen to the other
+     * <li>A certain Android OEM has an extra hardware button which can only be accessed
+     *     by something with 'signature' permissions.
+     * </ul>
+     *
+     * In general it's a way for the VNC remote control systems to make use of 'signature'
+     * level APIs and permissions, beyond the normal APIs required for basic remote control.
+     * Of course, as with basic remote control, all such APIs can only be used thanks
+     * to the assistance of the Android OEM.
+     *
+     * Note also the presence of {@link #customRequest(String, Bundle)}. The difference is
+     * that the present method influences the behaviour of the RemoteControlService with
+     * respect only to a single connection; the {@link #customRequest(String, Bundle)}
+     * requests it to change its behaviour in a more general way which applies globally
+     * for all clients which are using remote control. Most use-cases will find
+     * 'customClientRequest' more appropriate than 'customRequest'.
+     *
+     * @param extensionType The extension name; as above this is given in reverse-DNS location
+     * @param payload Any payload required for this custom message. This can be null; it's up
+     *                to the custom message to interpret this however it likes.
+     * @return null if the remote control service could not understand the message; non-null
+     *              if the service did understand the message. In which case the content of
+     *              the Bundle will be whatever is returned by that custom bit of the
+     *              RemoteControlService.
+     */
+    public Bundle customClientRequest(String extensionType, Bundle payload) throws ServiceExitedException {
+        try {
+            return getServiceInterface().customClientRequest(getCallbackHandler(), extensionType, payload);
+        } catch(RemoteException e) {
+            // Earlier versions of the RemoteControlService didn't support customClientRequest,
+            // so they may give us RemoteException. We'll assume that we're talking to an older
+            // version and therefore just tell the client that this particular request wasn't
+            // supported.
+            return null;
+        }
+    }
+
+    /**
+     * Sends a globally-applicable custom request to the RemoteControlService. This is very
+     * similar to {@link #customClientRequest(String, Bundle)} except that it changes the
+     * global behaviour of the RemoteControlService, instead of just its behaviour with
+     * respect to the present remote control session. Generally speaking,
+     * {@link #customClientRequest(String, Bundle)} is usually more applicable.
+     *
+     * @param extensionType The extension name; as above this is given in reverse-DNS location
+     * @param payload Any payload required for this custom message. This can be null; it's up
+     *                to the custom message to interpret this however it likes.
+     * @return null if the remote control service could not understand the message; non-null
+     *              if the service did understand the message. In which case the content of
+     *              the Bundle will be whatever is returned by that custom bit of the
+     *              RemoteControlService.
+     */
+    public Bundle customRequest(String extensionType, Bundle payload) throws ServiceExitedException {
+        try {
+            return getServiceInterface().customRequest(extensionType, payload);
         } catch(RemoteException e) {
             throw new ServiceExitedException();
         }
