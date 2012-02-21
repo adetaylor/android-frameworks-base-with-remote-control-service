@@ -550,6 +550,7 @@ class ServerThread extends Thread {
             try {
                 Slog.i(TAG, "RemoteControlService");
                 remote = new RemoteControlService(context);
+                ServiceManager.addService("remote_control", remote);
             } catch (Throwable e) {
                 reportWtf("starting RemoteControlService service", e);
             }

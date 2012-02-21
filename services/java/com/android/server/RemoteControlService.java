@@ -62,7 +62,7 @@ import android.os.RemoteControl;
  * This code runs in the system server rather than the client process,
  * so it is responsible for enforcing all security restrictions. */
 
-public class RemoteControlService implements IBinder.DeathRecipient
+public class RemoteControlService extends IRemoteControl.Stub implements IBinder.DeathRecipient
 {
     private static final String TAG = "RemoteControlService";
 
@@ -317,158 +317,141 @@ public class RemoteControlService implements IBinder.DeathRecipient
     }
 
     /* Binder API */
-    private class BinderInterface extends IRemoteControl.Stub {
+    public int registerRemoteController(IRemoteControlClient obj) throws SecurityException, RemoteException {
+        synchronized (RemoteControlService.mCondVar) {
+            IBinder clientId = obj.asBinder();
 
-        public int registerRemoteController(IRemoteControlClient obj) throws SecurityException, RemoteException {
-            synchronized (RemoteControlService.mCondVar) {
-                IBinder clientId = obj.asBinder();
+            /* Perform security checks here and refuse to register the
+             * client if it's not permitted to use the service */
 
-                /* Perform security checks here and refuse to register the
-                 * client if it's not permitted to use the service */
+            IDevicePolicyManager dpm = IDevicePolicyManager.Stub.asInterface(
+                ServiceManager.getService(Context.DEVICE_POLICY_SERVICE));
+            /* Will throw SecurityException if remote control not permitted */
+            dpm.ensureCallerHasPolicy(DeviceAdminInfo.USES_POLICY_REMOTE_CONTROL);
 
-                IDevicePolicyManager dpm = IDevicePolicyManager.Stub.asInterface(
-                    ServiceManager.getService(Context.DEVICE_POLICY_SERVICE));
-                /* Will throw SecurityException if remote control not permitted */
-                dpm.ensureCallerHasPolicy(DeviceAdminInfo.USES_POLICY_REMOTE_CONTROL);
+            /* The client is authorised - add it to the registered clients
+             * map */
 
-                /* The client is authorised - add it to the registered clients
-                 * map */
+            if(mClients.containsKey(clientId)) {
+                Log.println(Log.ERROR, TAG, "Already registered: " + clientId);
+                throw new IllegalStateException("Already registered: " + clientId);
+            } else {
+                RemoteControlClient client = new RemoteControlClient(obj);
 
-                if(mClients.containsKey(clientId)) {
-                    Log.println(Log.ERROR, TAG, "Already registered: " + clientId);
-                    throw new IllegalStateException("Already registered: " + clientId);
-                } else {
-                    RemoteControlClient client = new RemoteControlClient(obj);
+                mClients.put(clientId, client);
 
-                    mClients.put(clientId, client);
-
-                    try {
-                        clientId.linkToDeath(RemoteControlService.this, 0);
-                    } catch(Exception e) {
-                        Log.println(Log.ERROR, TAG, "RemoteControl: exception");
-                        e.printStackTrace();
-                    }
-                }
-
-                return 0;
-            }
-        }
-
-        public void unregisterRemoteController(IRemoteControlClient obj) {
-            synchronized (RemoteControlService.mCondVar) {
-                IBinder clientId = obj.asBinder();
-                RemoteControlClient client = checkClient(obj);
-                client.release();
-                cleanupClient(clientId);
-            }
-        }
-
-        public RemoteControl.DeviceInfo getDeviceInfo(IRemoteControlClient obj) {
-            synchronized (RemoteControlService.mCondVar) {
-                RemoteControlClient client = checkClient(obj);
-                return client.getDeviceInfo();
-            }
-        }
-
-        public void releaseFrameBuffer(IRemoteControlClient obj) {
-            synchronized (RemoteControlService.mCondVar) {
-                RemoteControlClient client = checkClient(obj);
-                client.releaseFrameBuffer();
-            }
-        }
-
-        public int grabScreen(IRemoteControlClient obj, boolean incremental) {
-            synchronized (RemoteControlService.mCondVar) {
-                RemoteControlClient client = checkClient(obj);
-                return client.grabScreen(incremental);
-            }
-        }
-
-        public void injectKeyEvent(IRemoteControlClient obj, KeyEvent event) {
-            synchronized (RemoteControlService.mCondVar) {
-                RemoteControlClient client = checkClient(obj);
-                client.injectKeyEvent(event);
-            }
-        }
-
-        public void injectMotionEvent(IRemoteControlClient obj, MotionEvent event) {
-            synchronized (RemoteControlService.mCondVar) {
-                RemoteControlClient client = checkClient(obj);
-                client.injectMotionEvent(event);
-            }
-        }
-
-        /**
-         * @deprecated This is no longer used. See comments in {@link RemoteControl}.
-         */
-        public boolean verifyPermissions() {
-            return true;
-        }
-
-        public Bundle customRequest(String extensionType, Bundle payload) {
-            /* This version of the Remote Control Service does not support any
-             * extensions at the present time.
-             */
-            return null;
-        }
-
-        public Bundle customClientRequest(IRemoteControlClient obj, String extensionType, Bundle payload) {
-            synchronized (RemoteControlService.mCondVar) {
-                RemoteControlClient client = checkClient(obj);
-                return client.customClientRequest(extensionType, payload);
-            }
-        }
-
-        /* Custom Binder transaction implementation for getFrameBuffer(),
-         * because AIDL doesn't do file descriptor passing. */
-
-        @Override
-        public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
-            switch (code)
-            {
-            case RemoteControl.TRANSACTION_getFrameBuffer: {
-                synchronized (RemoteControlService.mCondVar) {
-                    data.enforceInterface("android.os.IRemoteControl");
-                    IBinder b = data.readStrongBinder();
-                    int pixfmt = data.readInt();
-                    IRemoteControlClient obj = IRemoteControlClient.Stub.asInterface(b);
-                    RemoteControlClient client = checkClient(obj);
-
-                    try {
-                        MemoryFile mf = client.getFrameBuffer(pixfmt);
-                        if(mf != null) {
-                            reply.writeInt(0);
-                            reply.writeFileDescriptor(mf.getFileDescriptor());
-                            reply.writeInt(mf.length());
-                            reply.writeNoException();
-                        } else {
-                            reply.writeInt(-1);
-                        }
-                    } catch(Exception e) {
-                        Log.println(Log.ERROR, TAG, "RemoteControl: exception");
-                        e.printStackTrace();
-                        Log.println(Log.ERROR, TAG, "RemoteControl: writing exception to reply");
-                        reply.writeException(e);
-                    }
-                    return true;
+                try {
+                    clientId.linkToDeath(RemoteControlService.this, 0);
+                } catch(Exception e) {
+                    Log.println(Log.ERROR, TAG, "RemoteControl: exception");
+                    e.printStackTrace();
                 }
             }
-            }
-            return super.onTransact(code, data, reply, flags);
+
+            return 0;
         }
     }
 
-    private BinderInterface mInterface = new BinderInterface();
+    public void unregisterRemoteController(IRemoteControlClient obj) {
+        synchronized (RemoteControlService.mCondVar) {
+            IBinder clientId = obj.asBinder();
+            RemoteControlClient client = checkClient(obj);
+            client.release();
+            cleanupClient(clientId);
+        }
+    }
+
+    public RemoteControl.DeviceInfo getDeviceInfo(IRemoteControlClient obj) {
+        synchronized (RemoteControlService.mCondVar) {
+            RemoteControlClient client = checkClient(obj);
+            return client.getDeviceInfo();
+        }
+    }
+
+    public void releaseFrameBuffer(IRemoteControlClient obj) {
+        synchronized (RemoteControlService.mCondVar) {
+            RemoteControlClient client = checkClient(obj);
+            client.releaseFrameBuffer();
+        }
+    }
+
+    public int grabScreen(IRemoteControlClient obj, boolean incremental) {
+        synchronized (RemoteControlService.mCondVar) {
+            RemoteControlClient client = checkClient(obj);
+            return client.grabScreen(incremental);
+        }
+    }
+
+    public void injectKeyEvent(IRemoteControlClient obj, KeyEvent event) {
+        synchronized (RemoteControlService.mCondVar) {
+            RemoteControlClient client = checkClient(obj);
+            client.injectKeyEvent(event);
+        }
+    }
+
+    public void injectMotionEvent(IRemoteControlClient obj, MotionEvent event) {
+        synchronized (RemoteControlService.mCondVar) {
+            RemoteControlClient client = checkClient(obj);
+            client.injectMotionEvent(event);
+        }
+    }
+
+    /**
+     * @deprecated This is no longer used. See comments in {@link RemoteControl}.
+     */
+    public boolean verifyPermissions() {
+        return true;
+    }
+
+    public Bundle customRequest(String extensionType, Bundle payload) {
+        /* This version of the Remote Control Service does not support any
+         * extensions at the present time.
+         */
+        return null;
+    }
+
+    public Bundle customClientRequest(IRemoteControlClient obj, String extensionType, Bundle payload) {
+        synchronized (RemoteControlService.mCondVar) {
+            RemoteControlClient client = checkClient(obj);
+            return client.customClientRequest(extensionType, payload);
+        }
+    }
+
+    /* Custom Binder transaction implementation for getFrameBuffer(),
+     * because AIDL doesn't do file descriptor passing. */
 
     @Override
-    public IBinder onBind(Intent intent) {
-        String action = intent.getAction();
+    public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+        switch (code)
+        {
+        case RemoteControl.TRANSACTION_getFrameBuffer: {
+            synchronized (RemoteControlService.mCondVar) {
+                data.enforceInterface("android.os.IRemoteControl");
+                IBinder b = data.readStrongBinder();
+                int pixfmt = data.readInt();
+                IRemoteControlClient obj = IRemoteControlClient.Stub.asInterface(b);
+                RemoteControlClient client = checkClient(obj);
 
-        if (action.equals(RemoteControl.BIND_SERVICE_INTENT)) {
-            return mInterface;
-        } else {
-            Log.println(Log.ERROR, TAG, "onBind: Unknown intent: " + action);
-            return null;
+                try {
+                    MemoryFile mf = client.getFrameBuffer(pixfmt);
+                    if(mf != null) {
+                        reply.writeInt(0);
+                        reply.writeFileDescriptor(mf.getFileDescriptor());
+                        reply.writeInt(mf.length());
+                        reply.writeNoException();
+                    } else {
+                        reply.writeInt(-1);
+                    }
+                } catch(Exception e) {
+                    Log.println(Log.ERROR, TAG, "RemoteControl: exception");
+                    e.printStackTrace();
+                    Log.println(Log.ERROR, TAG, "RemoteControl: writing exception to reply");
+                    reply.writeException(e);
+                }
+                return true;
+            }
         }
+        }
+        return super.onTransact(code, data, reply, flags);
     }
 }
