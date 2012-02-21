@@ -66,7 +66,7 @@ public class RemoteControlService extends IRemoteControl.Stub implements IBinder
 {
     private static final String TAG = "RemoteControlService";
 
-    private final Context mContext;
+    private Context mContext;
     private Display mDisplay;
     private IWindowManager mWindowManager;
 
