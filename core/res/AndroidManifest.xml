@@ -1634,13 +1634,6 @@
             android:permission="android.permission.MASTER_CLEAR"
             android:exported="true" />
 
-        <service android:name="com.android.server.RemoteControlService"
-		  android:exported="true">
-		  <intent-filter>
-			<action android:name="com.android.remote.BIND" />
-		  </intent-filter>
-		</service>
-
     </application>
 
 </manifest>
