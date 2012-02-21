@@ -50,9 +50,6 @@ public class RemoteControl
 {
     private static final String TAG = "RCClient";
 
-    //public static final String BIND_SERVICE_INTENT = "com.realvnc.android.remote.BIND";
-    public static final String BIND_SERVICE_INTENT = "com.android.remote.BIND";
-
     /* Exceptions that we can throw */
 
     /**
@@ -154,6 +151,8 @@ public class RemoteControl
     private Context mCtx;
 
     private DeviceInfo mDeviceInfo = null;
+    private IRemoteControl mServiceInterface;
+
 
     /**
      * {@hide}
@@ -169,72 +168,30 @@ public class RemoteControl
 
         mCtx = ctx;
 
-        mServiceConnection = new RemoteControlServiceConnection();
-
-        if(!ctx.bindService(new Intent(BIND_SERVICE_INTENT),
-                            mServiceConnection,
-                            Context.BIND_AUTO_CREATE)) {
-            mCtx.unbindService(mServiceConnection);
-            mServiceConnection = null;
-            mCallbackHandler.mListener.connectionStatus(RC_SERVICE_UNAVAILABLE);
-        }
+        mServiceInterface = getServiceInterface();
     }
 
-    private RemoteControlServiceConnection mServiceConnection;
+    private IRemoteControl getServiceInterface() {
 
-    private IRemoteControl mServiceInterface;
+        int rv;
 
-    private class RemoteControlServiceConnection implements ServiceConnection {
-
-        public void onServiceConnected(ComponentName name, final IBinder service) {
-            // This is called from the main thread of the app, but we want to immediately
-            // call registerRemoteController.
-            // Doing that in the main thread is probably a mistake, since it could
-            // take a long time (waiting for the user to respond to prompts, etc.)
-            // So let's create a thread for it.
-            Thread t = new Thread(new Runnable() {
-
-                @Override
-                public void run() {
-                    IRemoteControl newServiceInterface = IRemoteControl.Stub.asInterface(service);
-
-                    int rv;
-
-                    try {
-                        // This takes a long time, because it probably prompts the user,
-                        // hence we don't do it in our main thread.
-                        rv = newServiceInterface.registerRemoteController(mCallbackHandler);
-                    } catch(SecurityException e) {
-                        rv = RC_PERMISSION_DENIED;
-                    } catch(RemoteException e) {
-                        rv = RC_SERVICE_UNAVAILABLE;
-                    }
-
-                    synchronized (RemoteControl.this) {
-                        if(rv == RC_SUCCESS)
-                            mServiceInterface = newServiceInterface;
-                        else {
-                            try {
-                                mCtx.unbindService(mServiceConnection);
-                                mServiceConnection = null;
-                            } catch (IllegalArgumentException e) {
-                                // The service has been unbound by some
-                                // other thread
-                            }
-                        }
-
-                        if (mCallbackHandler != null)
-                            mCallbackHandler.mListener.connectionStatus(rv);
-                    }
-                }}, "RC registration thread");
-            t.start();
+        try {
+            IRemoteControl newServiceInterface = (IRemoteControl)mCtx.getSystemService("remote_control");
+            rv = newServiceInterface.registerRemoteController(mCallbackHandler);
+        } catch(SecurityException e) {
+            rv = RC_PERMISSION_DENIED;
+        } catch(RemoteException e) {
+            rv = RC_SERVICE_UNAVAILABLE;
         }
 
-        public void onServiceDisconnected(ComponentName name) {
-            synchronized (RemoteControl.this) {
-                mServiceInterface = null;
-            }
+        synchronized (RemoteControl.this) {
+            if(rv == RC_SUCCESS)
+                mServiceInterface = newServiceInterface;
+
+            if (mCallbackHandler != null)
+                mCallbackHandler.mListener.connectionStatus(rv);
         }
+        return newServiceInterface;
     }
 
     /**
@@ -481,22 +438,8 @@ public class RemoteControl
      * @return true if a remote control service is available, false otherwise.
      */
     public static boolean serviceAvailable(Context ctx) {
-        boolean ret = false;
-        try {
-            Intent i = new Intent(BIND_SERVICE_INTENT);
-            ComponentName cn = ctx.startService(i);
-            if(cn != null) {
-                ret = true;
-                /* Need to explicitly ask the service to be stopped, otherwise it'll
-                 * hang around forever. */
-                ctx.stopService(i);
-            }
-        } catch (SecurityException e) {
-            /* Ignore security exceptions as they will cause false to be returned */
-        }
-        return ret;
+        return (ctx.getSystemService("remote_control") != null);
     }
-
 
     /**
      * Stop using the remote control service. Call this method when
@@ -515,16 +458,6 @@ public class RemoteControl
                 // here, because we're exiting too.
             }
             mServiceInterface = null;
-        }
-
-        if(mServiceConnection != null) {
-            try {
-                mCtx.unbindService(mServiceConnection);
-            } catch(IllegalStateException e) {
-                // This can happen if connecting to the service
-                // failed. Ignore it here.
-            }
-            mServiceConnection = null;
         }
 
         mCallbackHandler = null;
