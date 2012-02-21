@@ -14,15 +14,29 @@
  * limitations under the License.
  */
 
+/* This file exposes the SurfaceFlinger's ScreenshotClient API to
+ * Java.
+ *
+ * The alternative would be to call the binder interfaces directly,
+ * which is more complex and more prone to failure if things change.
+ *
+ * Calling the Binder interfaces from Java isn't possible because the
+ * IMemory interface used by the screenshot API is exposed to native
+ * code only. */
+
 #define LOG_TAG "RemoteControlService"
 
 #include "jni.h"
-#include "JNIHelp.h"
-#include "android_runtime/AndroidRuntime.h"
-#include "android_util_Binder.h"
 
+#include "android_runtime/AndroidRuntime.h"
 #include <binder/IMemory.h>
 #include <surfaceflinger/SurfaceComposerClient.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+using namespace android;
 
 namespace android
 {
@@ -33,12 +47,31 @@ static struct {
     jfieldID nativeID;
 } gRemoteControlClientClassInfo;
 
+static struct {
+    jclass clazz;
 
-static void registerScreenshotClient(JNIEnv *env, jobject self, jint pixfmt)
+    jfieldID mAddress;
+} gMemoryFileClassInfo;
+
+static int registerScreenshotClient(JNIEnv *env, jobject self, jint pixfmt)
 {
-    ScreenshotClient *client = new ScreenshotClient(pixfmt);
-    client->update();
-    env->SetIntField(self, gRemoteControlClientClassInfo.nativeID, (jint) client);
+    /* First see if we can use the ScreenshotClient mechanism */
+    ScreenshotClient *client = new ScreenshotClient();    
+    int rv = client ? client->update() : -1;
+    if(rv == 0) {
+
+        /* Success! */
+
+        LOGI("Screen access method: SurfaceFlinger");
+        env->SetIntField(self, gRemoteControlClientClassInfo.nativeID, (jint) client);
+        return 0;
+    }
+
+    LOGE("SurfaceFlinger: failed with code %d (%s)", rv, strerror(-rv));
+
+    delete client;
+
+    return -1;
 }
 
 static ScreenshotClient *getClient(JNIEnv *env, jobject self)
@@ -55,73 +88,130 @@ static void unregisterScreenshotClient(JNIEnv *env, jobject self)
     env->SetIntField(self, gRemoteControlClientClassInfo.nativeID, 0);
 }
 
-static void getBufferFd(JNIEnv *env, jobject self, jobject fd_obj)
+static int grabScreen(JNIEnv *env, jobject self, jobject sharedBuffer, jboolean incremental, jint requestedW, jint requestedH)
 {
     ScreenshotClient *client = getClient(env, self);
-    int fd = client->getHeap()->getHeapID();
-    env->SetIntField(fd_obj,
-                     env->GetFieldID(env->FindClass("java/io/FileDescriptor"),
-                                     "descriptor", "I"),
-                     fd);
-}
+    int rv = -1;
 
-static jint getBufferLength(JNIEnv *env, jobject self)
-{
-    ScreenshotClient *client = getClient(env, self);
-    int length = client->getHeap()->getSize();
-    return length;
-}
+    if(client) {
+         if (requestedW == 0 || requestedH == 0)
+            rv = client->update();
+        else
+            rv = client->update(requestedW, requestedH);
 
-static int grabScreen(JNIEnv *env, jobject self, jboolean incremental)
-{
-    ScreenshotClient *client = getClient(env, self);
-    int rv;
-
-    if(incremental)
-        rv = client->wait_update();
-    else
-        rv = client->update();
-
-    if(rv != 0) {
-        LOGE("grabScreen: %d (%s)\n", rv, strerror(-rv));
+        if(rv == 0) {
+            void *buffer = (void *)env->GetIntField(sharedBuffer, gMemoryFileClassInfo.mAddress);
+            memcpy(buffer, client->getPixels(), client->getSize());
+        }
     }
-
     return rv;
 }
 
-static void signal(JNIEnv *env, jobject self)
+static int getBufferSize(JNIEnv *env, jobject self)
 {
     ScreenshotClient *client = getClient(env, self);
-    client->signal();
+    if(client)
+        return client->getSize();
+    else
+        return 0;
+}
+
+static void fillInFrameBufferMetrics(JNIEnv *env, jobject self, jobject di)
+{
+    /*
+      Need to set:
+        di.frameBufferWidth;
+    di.frameBufferHeight;
+    di.frameBufferFormat;
+    di.frameBufferStride;
+    di.frameBufferSize;
+    */
+    int fieldId;
+    ScreenshotClient *client = getClient(env, self);
+    jclass cls_DeviceInfo = env->FindClass(
+    "android/os/RemoteControl$DeviceInfo");
+
+    if (!cls_DeviceInfo || !client)
+      return;
+    
+    jfieldID frameBufferWidthFid = env->GetFieldID(cls_DeviceInfo,
+            "frameBufferWidth", "I");
+    jfieldID frameBufferHeightFid = env->GetFieldID(cls_DeviceInfo,
+            "frameBufferHeight", "I");
+    jfieldID frameBufferFormatFid = env->GetFieldID(cls_DeviceInfo,
+            "frameBufferFormat", "I");
+    jfieldID frameBufferStrideFid = env->GetFieldID(cls_DeviceInfo,
+            "frameBufferStride", "I");
+    jfieldID frameBufferSizeFid = env->GetFieldID(cls_DeviceInfo,
+            "frameBufferSize", "I");
+    
+    if (!frameBufferWidthFid || !frameBufferHeightFid || !frameBufferFormatFid ||
+    !frameBufferStrideFid || !frameBufferSizeFid)
+      return;
+    
+    env->SetIntField(di, frameBufferWidthFid, client->getWidth());
+    env->SetIntField(di, frameBufferHeightFid, client->getHeight());
+    env->SetIntField(di, frameBufferFormatFid, client->getFormat());
+    env->SetIntField(di, frameBufferStrideFid, client->getStride());
+    env->SetIntField(di, frameBufferSizeFid, client->getSize());
 }
 
 static JNINativeMethod method_table[] = {
-    { "nRegisterScreenshotClient", "(I)V", (void*)registerScreenshotClient },
+    { "nRegisterScreenshotClient", "(I)I", (void*)registerScreenshotClient },
     { "nUnregisterScreenshotClient", "()V", (void*)unregisterScreenshotClient },
-    { "nGetBufferFd", "(Ljava/io/FileDescriptor;)V", (void*)getBufferFd },
-    { "nGetBufferLength", "()I", (void*)getBufferLength },
-    { "nGrabScreen", "(Z)I", (void*)grabScreen },
-    { "nSignal", "()V", (void*)signal },
+    { "nGrabScreen", "(Landroid/os/MemoryFile;ZII)I", (void*)grabScreen },
+    { "nGetBufferSize", "()I", (void*)getBufferSize },
+    { "nFillInFrameBufferMetrics", "(Landroid/os/RemoteControl$DeviceInfo;)V", (void*)fillInFrameBufferMetrics },
 };
 
-int register_android_server_RemoteControlService(JNIEnv *env)
+};
+
+jint JNI_OnLoad(JavaVM *vm, void *reserved)
 {
-    int res = jniRegisterNativeMethods(env,
-                                       "com/android/server/RemoteControlService$RemoteControlClient",
-                                       method_table, NELEM(method_table));
+    void *env_;
+    JNIEnv *env;
+
+    if (vm->GetEnv(&env_, JNI_VERSION_1_4) != JNI_OK) {
+        LOGE("ERROR: GetEnv failed");
+        return -1;
+    }
+    env = (JNIEnv *)env_;
+    jclass clazz = env->FindClass("com/realvnc/android/remote/RemoteControlService$RemoteControlClient");
+
+    int res = env->RegisterNatives(clazz,
+                                   method_table, 
+                                   sizeof(method_table) / sizeof(method_table[0]));
     LOG_FATAL_IF(res < 0, "Unable to register native methods.");
 
     // RemoteControlClient
 
     jobject obj = env->FindClass("com/android/server/RemoteControlService$RemoteControlClient");
     LOG_FATAL_IF(!obj, "Unable to find RemoteControlClient class");
+    if (!obj) {
+      return -1;
+    }
     gRemoteControlClientClassInfo.clazz = (jclass)env->NewGlobalRef(obj);
 
     gRemoteControlClientClassInfo.nativeID = env->GetFieldID(gRemoteControlClientClassInfo.clazz,
                                                              "nativeID", "I");
     LOG_FATAL_IF(!gRemoteControlClientClassInfo.nativeID, "Unable to find nativeID field");
 
-    return 0;
-}
+    // MemoryFile
 
-};
+    obj = env->FindClass("android/os/MemoryFile");
+    LOG_FATAL_IF(!obj, "Unable to find MemoryFile class");
+    if (!obj) {
+      return -1;
+    }
+
+    gMemoryFileClassInfo.clazz = (jclass)env->NewGlobalRef(obj);
+
+    gMemoryFileClassInfo.mAddress = env->GetFieldID(gMemoryFileClassInfo.clazz,
+                                                    "mAddress", "I");
+    LOG_FATAL_IF(!gMemoryFileClassInfo.mAddress, "Unable to find mAddress field");
+    if (!gMemoryFileClassInfo.mAddress) {
+      return -1;
+    }
+
+    return JNI_VERSION_1_4;
+}
