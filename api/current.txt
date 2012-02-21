@@ -15166,7 +15166,6 @@ package android.os {
     method public void releaseFrameBuffer() throws android.os.RemoteControl.ServiceExitedException;
     method public static boolean serviceAvailable(android.content.Context);
     method public deprecated boolean verifyPermissions() throws android.os.RemoteControl.ServiceExitedException;
-    field public static final java.lang.String BIND_SERVICE_INTENT = "com.android.remote.BIND";
     field public static final int RC_DEVICE_ADMIN_NOT_ENABLED = 2; // 0x2
     field public static final int RC_DISCONNECTED = 4; // 0x4
     field public static final int RC_INCREMENTAL_UPDATES_UNAVAILABLE = 5; // 0x5
