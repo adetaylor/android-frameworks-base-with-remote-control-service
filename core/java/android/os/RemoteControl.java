@@ -31,7 +31,7 @@ import android.os.IRemoteControlClient;
  * be used for taking screenshots, or for implementing VNC servers or
  * other remote control applications.
  *
- * <p>To start using remote control, call {@link #getRemoteControl(Context)}
+ * <p>To start using remote control, call {@link #getRemoteControl(Context, ICallbacks)}
  * to create a RemoteControl object.</p>
  *
  * <p>To use this class, the user must explicitly authorise your
@@ -578,7 +578,7 @@ public class RemoteControl
     /**
      * Return the current device parameters such as screen resolution,
      * flip mode etc. The {@link
-     * RemoteControl.ICallbacks#deviceInfoChanged(DeviceInfo)}
+     * RemoteControl.ICallbacks#deviceInfoChanged()}
      * callback indicates that this information may have changed.
      *
      * @return a {@link RemoteControl.DeviceInfo} object.
@@ -597,13 +597,13 @@ public class RemoteControl
     }
 
     /**
-     * A wrapper around {@link #grabFrameBufferFd(int, boolean)} that
+     * A wrapper around {@link #getFrameBufferFd(int, boolean)} that
      * instead returns a {@link android.os.MemoryFile} with
      * the use of reflection.
      *
      * <p>The returned {@link android.os.MemoryFile MemoryFile} is
      * shared with the graphics subsystem. The {@link
-     * #grabScreen(boolean)} method causes it to be updated with the
+     * #grabScreen(boolean, Rect)} method causes it to be updated with the
      * current frame buffer contents as a bitmap. </p>
      *
      * <p>You can only have one shared frame buffer at a time.</p>
@@ -617,7 +617,7 @@ public class RemoteControl
      * snapshot of the current contents of the screen. Use this for
      * taking screenshots. If true, the contents of the returned
      * object need to be updated as the screen changes, by calling
-     * {@link #grabScreen(boolean)}. In this case you will need to
+     * {@link #grabScreen(boolean, Rect)}. In this case you will need to
      * call {@link #releaseFrameBuffer()} when you are finished
      * reading the screen. This case is intended for VNC servers or
      * other remote control applications.
@@ -632,14 +632,27 @@ public class RemoteControl
      * contact the remote control service.
      *
      * @deprecated This should no longer be used as it is not compatible
-     * with Ice Cream Sandwich. Use {@link #grabFrameBufferFd(int, boolean)} instead.
+     * with Ice Cream Sandwich. Use {@link #getFrameBufferFd(int, boolean)} instead.
      */
     public MemoryFile getFrameBuffer(int pixfmt, boolean persistent) throws FrameBufferUnavailableException, ServiceExitedException {
         MemoryAreaInformation mai = getFrameBufferFd(pixfmt, persistent);
 
-        return new MemoryFile(mai.getParcelFd().getFileDescriptor(),
-                              mai.getSize(),
-                              "r");
+        /* The MemoryFile constructor that we want to use is no longer
+         * available in ICS, so this method will fail. */
+        try {
+            Class cls = Class.forName("android.os.MemoryFile");
+            Constructor ctor = cls.getConstructor(new Class[] { FileDescriptor.class,
+                                                                int.class,
+                                                                String.class });
+            MemoryFile mf = (MemoryFile) ctor.newInstance(new Object[] { mai.getParcelFd().getFileDescriptor(),
+                                                                         mai.getSize(),
+                                                                         "r" });
+            return mf;
+        } catch(Throwable e) {
+            Log.println(Log.ERROR, TAG, "RemoteControl: reflection failure");
+            e.printStackTrace();
+            throw new FrameBufferUnavailableException();
+        }
     }
 
     /**
@@ -648,7 +661,7 @@ public class RemoteControl
      * <p>The returned {@link MemoryAreaInformation} represents the
      * {@link android.os.MemoryFile MemoryFile} that is
      * shared with the graphics subsystem. The {@link
-     * #grabScreen(boolean)} method causes it to be updated with the
+     * #grabScreen(boolean, Rect)} method causes it to be updated with the
      * current frame buffer contents as a bitmap. </p>
      *
      * <p>You can only have one shared frame buffer at a time.</p>
@@ -662,7 +675,7 @@ public class RemoteControl
      * snapshot of the current contents of the screen. Use this for
      * taking screenshots. If true, the contents of the returned
      * object need to be updated as the screen changes, by calling
-     * {@link #grabScreen(boolean)}. In this case you will need to
+     * {@link #grabScreen(boolean, Rect)}. In this case you will need to
      * call {@link #releaseFrameBuffer()} when you are finished
      * reading the screen. This case is intended for VNC servers or
      * other remote control applications.
@@ -722,11 +735,12 @@ public class RemoteControl
      * Release the frame buffer.
      *
      * If you have obtained access to the frame buffer using {@link
-     * #getFrameBuffer(int, boolean)} with persistent set to true, you
+     * #getFrameBuffer(int, boolean)} or
+     * {@link #getFrameBufferFd(int, boolean)} with persistent set to true, you
      * can release your claim to the frame buffer using this function.
      *
      * If another thread is currently blocked in {@link
-     * #grabScreen(boolean)} it will exit with a {@link
+     * #grabScreen(boolean, Rect)} it will exit with a {@link
      * DisconnectedException}.
      *
      * @throws ServiceExitedException if it was not possible to
@@ -747,7 +761,7 @@ public class RemoteControl
      * This function can either grab the screen immediately, or it
      * can wait for a region to be updated before grabbing.
      *
-     * In both cases, the {@link android.graphics.Rect} 'changed'
+     * In both cases, the {@link android.graphics.Rect} 'changedRect'
      * describes which areas of the frame buffer have been updated.
      *
      * Previous versions of this function dealt in terms of
@@ -767,7 +781,7 @@ public class RemoteControl
      * screen and returns immediately. If true, the function blocks if
      * necessary until a change occurs.
      *
-     * @param changed A rectangle which, after the function returns, will
+     * @param changedRect A rectangle which, after the function returns, will
      * contain the area of the screen which has changed. This will
      * always be cleared and set to the actual changed area. We pass
      * it as a parameter instead of returning it, in order to avoid
