@@ -3953,7 +3953,7 @@ package android.app.admin {
     field public static final int USES_POLICY_EXPIRE_PASSWORD = 6; // 0x6
     field public static final int USES_POLICY_FORCE_LOCK = 3; // 0x3
     field public static final int USES_POLICY_LIMIT_PASSWORD = 0; // 0x0
-    field public static final int USES_POLICY_REMOTE_CONTROL = 5; // 0x5
+    field public static final int USES_POLICY_REMOTE_CONTROL = 9; // 0x9
     field public static final int USES_POLICY_RESET_PASSWORD = 2; // 0x2
     field public static final int USES_POLICY_WATCH_LOGIN = 1; // 0x1
     field public static final int USES_POLICY_WIPE_DATA = 4; // 0x4
