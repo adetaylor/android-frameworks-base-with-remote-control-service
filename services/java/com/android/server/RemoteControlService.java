@@ -62,13 +62,13 @@ import android.os.RemoteControl;
  * This code runs in the system server rather than the client process,
  * so it is responsible for enforcing all security restrictions. */
 
-public class RemoteControlService extends Service implements IBinder.DeathRecipient
+public class RemoteControlService implements IBinder.DeathRecipient
 {
     private static final String TAG = "RemoteControlService";
 
+    private final Context mContext;
     private Display mDisplay;
     private IWindowManager mWindowManager;
-    private boolean mNativeLibraryLoadFailed;
 
     /**
      * Big global lock for everything relating to the remote control service.
@@ -79,19 +79,10 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
      */
     private static Object mCondVar = new Object();
 
-    @Override
-    public void onCreate() {
-
-        try {
-            System.loadLibrary("remotecontrol");
-            mNativeLibraryLoadFailed = false;
-        } catch (java.lang.UnsatisfiedLinkError e) {
-            mNativeLibraryLoadFailed = true;
-        }
-
-        WindowManager wm = (WindowManager)getSystemService(Context.WINDOW_SERVICE);
+    public void RemoteControlService(Context context) {
+		mContext = context;
+        WindowManager wm = (WindowManager)mContext.getSystemService(Context.WINDOW_SERVICE);
         mDisplay = wm.getDefaultDisplay();
-
         mWindowManager = IWindowManager.Stub.asInterface(ServiceManager.getService("window"));
     }
 
@@ -330,11 +321,6 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
 
         public int registerRemoteController(IRemoteControlClient obj) throws SecurityException, RemoteException {
             synchronized (RemoteControlService.mCondVar) {
-                if (mNativeLibraryLoadFailed) {
-                    Log.e(TAG, "Failed to load native library, failing request to register controller");
-                    return RemoteControl.RC_SERVICE_LACKING_OTHER_OS_FACILITIES;
-                }
-
                 IBinder clientId = obj.asBinder();
 
                 /* Perform security checks here and refuse to register the
