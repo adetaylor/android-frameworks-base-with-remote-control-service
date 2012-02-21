@@ -34,6 +34,7 @@ import android.app.admin.DeviceAdminInfo;
 import android.app.admin.IDevicePolicyManager;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.Region;
 import android.net.ConnectivityManager;
@@ -78,50 +79,6 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
      */
     private static Object mCondVar = new Object();
 
-    /**
-     * Enumeration used by the {@link AuthoriseActivity} to tell us the results
-     * of the authorisation prompt.
-     */
-    enum AuthorisationResult {
-        UNKNOWN,
-        REJECTED,
-        APPROVED
-    }
-
-    /**
-     * Enumeration representing the state as to whether we're displaying an authorisation
-     * prompt right now.
-     */
-    private enum AuthorisationState {
-        IDLE,
-        ACTIVE
-    }
-
-    /**
-     * Class to represent an authorisation box which we need to display to the user.
-     * We only display one of these at a time, so we keep them in a queue.
-     */
-    private static class PendingAuthorisation {
-        PendingAuthorisation(Intent i) {
-            mIntent = i;
-        }
-
-        Intent mIntent;
-        AuthorisationResult mResult = AuthorisationResult.UNKNOWN;
-    }
-
-    /**
-     * The queue of authorisation dialogs we need to display to the user at some point.
-     */
-    private LinkedList<PendingAuthorisation> mPendingAuthorisations = new LinkedList<PendingAuthorisation>();
-
-    /**
-     * Result of any currently displayed authorisation prompt. Only one is displayed
-     * at once, thanks to locks, so it's safe to have a single one.
-     */
-    private static AuthorisationResult mAuthorisationResult;
-    private AuthorisationState mAuthorisationState = AuthorisationState.IDLE;
-
     @Override
     public void onCreate() {
 
@@ -129,9 +86,6 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
             System.loadLibrary("remotecontrol");
             mNativeLibraryLoadFailed = false;
         } catch (java.lang.UnsatisfiedLinkError e) {
-            Log.e(TAG, "Failed to load remote control native library, check that the correct shared library for the OS ABI is provided in the APK.");
-            Log.e(TAG, "CPU_ABI: " + android.os.Build.CPU_ABI);
-            Log.e(TAG, "CPU_ABI2: " + android.os.Build.CPU_ABI2);
             mNativeLibraryLoadFailed = true;
         }
 
@@ -371,86 +325,6 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
         }
     }
 
-    private AuthorisationResult promptForAuthorisation(String pkgName) {
-
-        Log.println(Log.INFO, TAG, "RemoteControl: authorisation prompt requested for "+pkgName);
-
-            /* Perform security checks here and refuse to register the
-             * client if it's not permitted to use the service */
-
-            IDevicePolicyManager dpm = IDevicePolicyManager.Stub.asInterface(
-                ServiceManager.getService(Context.DEVICE_POLICY_SERVICE));
-
-            try {
-                dpm.ensureCallerHasPolicy(DeviceAdminInfo.USES_POLICY_REMOTE_CONTROL);
-            } catch(SecurityException e) {
-                return AuthorisationResult.DENIED;
-            }
-
-            return AuthorisationResult.APPROVED;
-    }
-
-    private static FileDescriptor MemoryFile_getFileDescriptor(MemoryFile mf) {
-        // The method that we want to use is marked as '@hide' which
-        // means it isn't available to .apk packages, even ones that
-        // are compiled as part of the platform build.
-
-        // So we use reflection, to avoid having to modify platform
-        // core code.
-
-        try {
-            Class<?> cls = Class.forName("android.os.MemoryFile");
-            Method meth = cls.getMethod("getFileDescriptor",
-                                        new Class[] {});
-            FileDescriptor fd = (FileDescriptor) meth.invoke(mf,
-                                                             new Object[] {});
-            return fd;
-        } catch(Throwable e) {
-            Log.println(Log.ERROR, TAG, "RemoteControl: reflection failure");
-            e.printStackTrace();
-            return null;
-        }
-    }
-
-    private static String getHexString(byte[] b) {
-        StringBuilder result = new StringBuilder();
-        for (int i=0; i < b.length; i++) {
-            result.append(
-                          Integer.toString( ( b[i] & 0xff ) + 0x100, 16).substring( 1 ));
-        }
-        return result.toString();
-    }
-
-    private static Set<String> getSystemSigningKeys(Context ctx) {
-        PackageManager pm = ctx.getPackageManager();
-
-        Set<String> results = new HashSet<String>();
-
-        try {
-            PackageInfo pi = pm.getPackageInfo("android", pm.GET_SIGNATURES);
-            if(pi != null) {
-                int i;
-
-                Log.i(TAG, "Found " + pi.signatures.length + " system signing keys");
-
-                for(i=0; i<pi.signatures.length; i++) {
-                    MessageDigest md = MessageDigest.getInstance("SHA1");
-                    md.update(pi.signatures[i].toByteArray());
-                    String key = getHexString(md.digest());
-                    results.add(key);
-                    Log.i(TAG, "Key " + i + " is " + key);
-                }
-
-            }
-        } catch(NoSuchAlgorithmException e) {
-            Log.e(TAG, "Failed to find algorithm for system signing keys");
-        } catch(PackageManager.NameNotFoundException e) {
-            Log.e(TAG, "Failed to find package for system signing keys");
-        }
-
-        return results;
-    }
-
     /* Binder API */
     private class BinderInterface extends IRemoteControl.Stub {
 
@@ -461,60 +335,15 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
                     return RemoteControl.RC_SERVICE_LACKING_OTHER_OS_FACILITIES;
                 }
 
-                // Shortly, we're going to start doing lots of security checks
-                // to ensure whether the caller has the rights to remote control.
-                // But before we do that, let's check whether we ourselves have
-                // the right!
-                PackageManager p = getApplicationContext().getPackageManager();
-                if (p.checkPermission("android.permission.READ_FRAME_BUFFER", getPackageName()) != PackageManager.PERMISSION_GRANTED ||
-                        p.checkPermission("android.permission.INJECT_EVENTS", getPackageName()) != PackageManager.PERMISSION_GRANTED) {
-                    Log.e(TAG, "RemoteControlService hasn't been signed by the right certificate for this device.");
-                    try {
-                        PackageInfo pi = p.getPackageInfo(getPackageName(), p.GET_SIGNATURES);
-                        if(pi.signatures != null)
-                            for(Signature s : pi.signatures) {
-                                MessageDigest md = MessageDigest.getInstance("SHA1");
-                                md.update(s.toByteArray());
-                                String key = getHexString(md.digest());
-                                Log.e(TAG, "Package signed with key: " + key);
-                            }
-                        getSystemSigningKeys(getApplicationContext());
-
-                    } catch(NoSuchAlgorithmException e) {
-                        Log.e(TAG, "Failed to find algorithm for package signing keys");
-                    } catch (PackageManager.NameNotFoundException e) {
-                        Log.e(TAG, "Failed to retrieve package signing key");
-                    }
-                    return RemoteControl.RC_SERVICE_ITSELF_LACKING_PERMISSIONS;
-                }
-
                 IBinder clientId = obj.asBinder();
 
                 /* Perform security checks here and refuse to register the
                  * client if it's not permitted to use the service */
 
-                String[] pkgs = getPackageManager().getPackagesForUid(getCallingUid());
-
-                // TODO: what if there are more than one? For now just
-                // disallow it
-                if(pkgs.length != 1)
-                    throw new SecurityException("Not authorised for remote control");
-
-                String pkgName = pkgs[0];
-                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
-                boolean isAuthorised = prefs.getBoolean("is_authorised_" + pkgName, false);
-
-                if(!isAuthorised) {
-                    AuthorisationResult rv = promptForAuthorisation(pkgName);
-
-                    if(rv != AuthorisationResult.APPROVED) {
-                        throw new SecurityException("Not authorised for remote control");
-                    }
-                }
-
-                SharedPreferences.Editor edit = prefs.edit();
-                edit.putBoolean("is_authorised_" + pkgName, true);
-                edit.commit();
+                IDevicePolicyManager dpm = IDevicePolicyManager.Stub.asInterface(
+                    ServiceManager.getService(Context.DEVICE_POLICY_SERVICE));
+                /* Will throw SecurityException if remote control not permitted */
+                dpm.ensureCallerHasPolicy(DeviceAdminInfo.USES_POLICY_REMOTE_CONTROL);
 
                 /* The client is authorised - add it to the registered clients
                  * map */
@@ -545,26 +374,6 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
                 RemoteControlClient client = checkClient(obj);
                 client.release();
                 cleanupClient(clientId);
-
-                // In an ideal world, we would also here check to see if there
-                // is an authorisation prompt visible, and hide it.
-                // This could occur if the VNC server happens to 'reset'
-                // or 'disconnect' whilst the user is being prompted.
-
-                // But cancelling the notification isn't simple. It's
-                // complicated because we don't know whether it would be at
-                // the stage of being a mere notification, or if it had actually
-                // progressed as far as being an Activity.
-
-                // We're therefore not going to attempt to cancel pending
-                // authorisation attempts.
-
-                // We could go half-way, and iterate through mPendingNotifications
-                // (and the currently displayed notification), fill in mResult
-                // and mCondVar.notifyAll(). This would kick the relevant thread
-                // out of its wait, but it wouldn't actually do anything to hide
-                // any notifications or activities, so it doesn't seem worth
-                // the benefit.
             }
         }
 
@@ -643,7 +452,7 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
                         MemoryFile mf = client.getFrameBuffer(pixfmt);
                         if(mf != null) {
                             reply.writeInt(0);
-                            reply.writeFileDescriptor(MemoryFile_getFileDescriptor(mf));
+                            reply.writeFileDescriptor(mf.getFileDescriptor());
                             reply.writeInt(mf.length());
                             reply.writeNoException();
                         } else {
