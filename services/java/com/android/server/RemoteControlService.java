@@ -19,7 +19,15 @@ package com.android.server;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.lang.IllegalStateException;
+import java.lang.reflect.*;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.Set;
+import java.util.concurrent.Semaphore;
 
 import android.app.Service;
 import android.app.admin.DeviceAdminInfo;
@@ -28,24 +36,25 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Rect;
 import android.graphics.Region;
-import android.graphics.PixelFormat;
+import android.net.ConnectivityManager;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
-import android.os.IRemoteControl;
-import android.os.IRemoteControlClient;
 import android.os.MemoryFile;
 import android.os.Parcel;
-import android.os.RemoteControl;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.util.Log;
 import android.view.Display;
-import android.view.IRotationWatcher;
 import android.view.IWindowManager;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.WindowManager;
-import android.view.WindowManagerImpl;
+
+import android.os.IRemoteControl;
+import android.os.IRemoteControlClient;
+import android.os.RemoteControl;
+
 
 /* Server-side implementation of the remote control service.
  *
@@ -57,124 +66,267 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
     private static final String TAG = "RemoteControlService";
 
     private Display mDisplay;
-
     private IWindowManager mWindowManager;
+    private boolean mNativeLibraryLoadFailed;
+
+    /**
+     * Big global lock for everything relating to the remote control service.
+     * Absolutely everything should be locked on this - see MOB-5499 for justification.
+     * This does mean that some method calls might take a long time waiting for others
+     * to complete, but we've decided that the frequency of multiple clients trying to
+     * use RemoteControlService is so slim that a big global lock is acceptable.
+     */
+    private static Object mCondVar = new Object();
+
+    /**
+     * Enumeration used by the {@link AuthoriseActivity} to tell us the results
+     * of the authorisation prompt.
+     */
+    enum AuthorisationResult {
+        UNKNOWN,
+        REJECTED,
+        APPROVED
+    }
+
+    /**
+     * Enumeration representing the state as to whether we're displaying an authorisation
+     * prompt right now.
+     */
+    private enum AuthorisationState {
+        IDLE,
+        ACTIVE
+    }
+
+    /**
+     * Class to represent an authorisation box which we need to display to the user.
+     * We only display one of these at a time, so we keep them in a queue.
+     */
+    private static class PendingAuthorisation {
+        PendingAuthorisation(Intent i) {
+            mIntent = i;
+        }
+
+        Intent mIntent;
+        AuthorisationResult mResult = AuthorisationResult.UNKNOWN;
+    }
+
+    /**
+     * The queue of authorisation dialogs we need to display to the user at some point.
+     */
+    private LinkedList<PendingAuthorisation> mPendingAuthorisations = new LinkedList<PendingAuthorisation>();
+
+    /**
+     * Result of any currently displayed authorisation prompt. Only one is displayed
+     * at once, thanks to locks, so it's safe to have a single one.
+     */
+    private static AuthorisationResult mAuthorisationResult;
+    private AuthorisationState mAuthorisationState = AuthorisationState.IDLE;
 
     @Override
     public void onCreate() {
-        mClients = new HashMap<IBinder, RemoteControlClient>();
-
-        mDisplay = WindowManagerImpl.getDefault().getDefaultDisplay();
-
-        IBinder wmbinder = ServiceManager.getService("window");
-        mWindowManager = IWindowManager.Stub.asInterface(wmbinder);
 
         try {
-            mWindowManager.watchRotation(mInterface);
-        } catch(RemoteException e) {
-            // Ignore this error because there's not much we can do
-            // about it, and if the window manager isn't running then
-            // we probably couldn't have got here in the first place.
+            System.loadLibrary("remotecontrol");
+            mNativeLibraryLoadFailed = false;
+        } catch (java.lang.UnsatisfiedLinkError e) {
+            Log.e(TAG, "Failed to load remote control native library, check that the correct shared library for the OS ABI is provided in the APK.");
+            Log.e(TAG, "CPU_ABI: " + android.os.Build.CPU_ABI);
+            Log.e(TAG, "CPU_ABI2: " + android.os.Build.CPU_ABI2);
+            mNativeLibraryLoadFailed = true;
         }
+
+        WindowManager wm = (WindowManager)getSystemService(Context.WINDOW_SERVICE);
+        mDisplay = wm.getDefaultDisplay();
+
+        mWindowManager = IWindowManager.Stub.asInterface(ServiceManager.getService("window"));
     }
 
     /* Class representing a client connected to the remote control
      * service. */
-    private class RemoteControlClient
-    {
-        public MemoryFile mFrameBuffer;
-
-        /* Functions implemented in native code in services/jni/ */
-        private native void nRegisterScreenshotClient(int pixfmt);
+    private class RemoteControlClient {
+        private native int nRegisterScreenshotClient(int pixfmt);
         private native void nUnregisterScreenshotClient();
-        private native void nGetBufferFd(FileDescriptor f);
-        private native int nGetBufferLength();
-        private native int nGrabScreen(boolean incremental);
-        private native void nSignal();
-        int nativeID = 0;
-        volatile boolean closing = false;
+        private native int nGrabScreen(MemoryFile buffer, boolean incremental, int requestedW, int requestedH);
+        private native int nGetBufferSize();
+        private native void nFillInFrameBufferMetrics(RemoteControl.DeviceInfo di);
 
-        private RemoteControlClient() {
-            mFrameBuffer = null;
+        private int nativeID = 0;
+        private volatile boolean mHasFrameBuffer = false;
+
+        private int mGrabPixelFormat;
+
+        private MemoryFile mSharedBuffer;
+
+        private int mCurrentRotation;
+
+        private IRemoteControlClient mListener;
+
+        // The scaled size (if any) that will be requested from SurfaceFlinger.
+        private int mScaledW;
+        private int mScaledH;
+
+        private RemoteControlClient(IRemoteControlClient listener) {
+            mListener = listener;
+            mGrabPixelFormat = PixelFormat.RGBA_8888;
         }
 
-        private synchronized void unregister() {
-            if(mFrameBuffer != null) {
-                Log.println(Log.ERROR, TAG, "Client didn't release frame buffer");
-                unregisterScreenshotClient();
-            }
-            mFrameBuffer = null;
-        }
+        /* Binder API */
 
-        private synchronized void registerScreenshotClient(int pixfmt) throws IOException {
-            nRegisterScreenshotClient(pixfmt);
+        RemoteControl.DeviceInfo getDeviceInfo() {
+            RemoteControl.DeviceInfo di = new RemoteControl.DeviceInfo();
 
-            FileDescriptor fd = new FileDescriptor();
-            nGetBufferFd(fd);
-            mFrameBuffer = new MemoryFile(fd, nGetBufferLength(), "r");
-        }
+            di.fbPixelFormat = mGrabPixelFormat;
+            di.displayOrientation = mDisplay.getRotation();
 
-        private synchronized void unregisterScreenshotClient() {
-            nUnregisterScreenshotClient();
-            mFrameBuffer.close();
-            mFrameBuffer = null;
-        }
-
-        private synchronized int grabScreen(boolean incremental) {
-            return nGrabScreen(incremental);
-        }
-
-        protected void finalize() throws Throwable {
-            try {
-                if(mFrameBuffer != null) {
-                    Log.println(Log.ERROR, TAG, "RemoteControlClient: releasing frame buffer in finalize()");
-                    mFrameBuffer.close();
+            /* From Ice Cream Sandwich onwards Display.getWidth() no longer returns the full
+             * width of the display as it doesn't take into account the soft-keys. So we need to
+             * use a different API that is not present in earlier Android versions to get it. */
+            if((di.displayOrientation & 1) == 0) {
+                try {
+                    di.fbWidth = (Integer)Display.class.getMethod("getRawWidth").invoke(mDisplay);
+                    di.fbHeight = (Integer)Display.class.getMethod("getRawHeight").invoke(mDisplay);
+                } catch (Throwable t) {
+                    di.fbWidth = mDisplay.getWidth();
+                    di.fbHeight = mDisplay.getHeight();
                 }
-                mFrameBuffer = null;
-            } finally {
-                super.finalize();
+            } else {
+                try {
+                    di.fbHeight = (Integer)Display.class.getMethod("getRawWidth").invoke(mDisplay);
+                    di.fbWidth = (Integer)Display.class.getMethod("getRawHeight").invoke(mDisplay);
+                } catch (Throwable t) {
+                    di.fbHeight = mDisplay.getWidth();
+                    di.fbWidth = mDisplay.getHeight();
+                }
+            }
+
+            /* Fill in unknown as default values as the
+               native method might fail */
+            di.frameBufferWidth = -1;
+            di.frameBufferHeight = -1;
+            di.frameBufferFormat = android.graphics.PixelFormat.UNKNOWN;
+            di.frameBufferStride = -1;
+            di.frameBufferSize = -1;
+
+            nFillInFrameBufferMetrics(di);
+
+            return di;
+        }
+
+        MemoryFile getFrameBuffer(int pixfmt) throws IOException {
+
+            if(mHasFrameBuffer || (pixfmt != mGrabPixelFormat))
+                return null;
+
+            mCurrentRotation = mDisplay.getRotation();
+            mHasFrameBuffer = true;
+
+            if(nRegisterScreenshotClient(pixfmt) < 0)
+                return null;
+
+            int size = nGetBufferSize();
+            mSharedBuffer = new MemoryFile("SharedFrameBuffer", size);
+            return mSharedBuffer;
+        }
+
+        void releaseFrameBuffer() {
+
+            if(mHasFrameBuffer) {
+                mHasFrameBuffer = false;
+
+                try {
+                    nUnregisterScreenshotClient();
+
+                } catch(Exception e) {
+                    Log.println(Log.ERROR, TAG, "RemoteControl: exception");
+                    e.printStackTrace();
+                }
             }
         }
-    };
+
+        int grabScreen(boolean incremental) {
+
+            boolean loop = false;
+            int rv = -1;
+
+            if(incremental)
+                return RemoteControl.RC_INCREMENTAL_UPDATES_UNAVAILABLE;
+
+            if(!mHasFrameBuffer)
+                return RemoteControl.RC_DISCONNECTED;
+
+            // Poll for screen orientation changes. We could use
+            // call IWindowManager.watchRotation() instead.
+
+            int rotation = mDisplay.getRotation();
+            if(rotation != mCurrentRotation) {
+                mCurrentRotation = rotation;
+                try {
+                    if(mListener != null)
+                        mListener.deviceInfoChanged();
+                } catch(RemoteException e) {
+                    Log.println(Log.ERROR, TAG, "RemoteControl: exception in grabScreen");
+                    e.printStackTrace();
+                }
+                return 0;
+            } else {
+                rv = nGrabScreen(mSharedBuffer, incremental, mScaledW, mScaledH);
+            }
+
+            return rv;
+        }
+
+        void injectKeyEvent(KeyEvent event) {
+            try {
+                mWindowManager.injectKeyEvent(event, false);
+            } catch(RemoteException e) {
+                Log.println(Log.ERROR, TAG, "RemoteControl: exception in injectKeyEvent");
+                e.printStackTrace();
+            }
+        }
+
+        void injectMotionEvent(MotionEvent event) {
+            try {
+                mWindowManager.injectPointerEvent(event, false);
+            } catch(RemoteException e) {
+                Log.println(Log.ERROR, TAG, "RemoteControl: exception in injectMotionEvent");
+                e.printStackTrace();
+            }
+        }
+
+        void release() {
+            if(mHasFrameBuffer)
+                releaseFrameBuffer();
+            mSharedBuffer = null;
+            mListener = null;
+        }
+
+        Bundle customClientRequest(String extensionType, Bundle payload) {
+            if (extensionType.equals("com.realvnc.serversidescaling")) {
+                // Ignore version for now since we only support v1.
+                mScaledW = payload.getInt("width");
+                mScaledH = payload.getInt("height");
+                int rv = grabScreen(false);
+                try {
+                    if(mListener != null)
+                        /* Get the client to call getDeviceInfo(), which
+                         * will now contain details of the scaled screen. */
+                        mListener.deviceInfoChanged();
+                } catch (RemoteException e) {
+                    Log.e(TAG, "Failed to inform client that screen parameters have changed after scaling request");
+                }
+                Bundle response = new Bundle();
+                response.putInt("err", rv);
+                return response;
+            } else
+                return null;
+        }
+    }
 
     /* Map of all registered clients.
      *
      * A client is only added to the map if it is authorised to use
      * the remote control service. */
-    private HashMap<IBinder, RemoteControlClient> mClients;
-
-    private RemoteControl.DeviceInfo buildDeviceInfo() {
-        RemoteControl.DeviceInfo di = new RemoteControl.DeviceInfo();
-
-        di.fbPixelFormat = mDisplay.getPixelFormat();
-        di.displayOrientation = mDisplay.getOrientation();
-
-        if((di.displayOrientation & 1) == 0) {
-            di.fbWidth = mDisplay.getWidth();
-            di.fbHeight = mDisplay.getHeight();
-        } else {
-            di.fbHeight = mDisplay.getWidth();
-            di.fbWidth = mDisplay.getHeight();
-        }
-
-        return di;
-    }
-
-    /* Callback from the window manager service when the screen rotation changes */
-    public void onRotationChanged(int rotation) {
-        for(IBinder clientId : mClients.keySet()) {
-            IRemoteControlClient obj;
-
-            obj = IRemoteControlClient.Stub.asInterface(clientId);
-
-            try {
-                obj.deviceInfoChanged();
-            } catch(Exception e) {
-                Log.println(Log.ERROR, TAG, "RemoteControl: exception during callback");
-                e.printStackTrace();
-            }
-        }
-    }
+    private HashMap<IBinder, RemoteControlClient> mClients = new HashMap<IBinder, RemoteControlClient>();
 
     /* Check that we're dealing with a correctly registered client.
      *
@@ -182,6 +334,7 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
      * call this function to ensure that the client passed the
      * security check in registerRemoteController(). */
     private RemoteControlClient checkClient(IRemoteControlClient obj) {
+
         IBinder clientId = obj.asBinder();
         RemoteControlClient client = mClients.get(clientId);
 
@@ -194,24 +347,33 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
         return client;
     }
 
+    private void cleanupClient(IBinder clientId) {
+        clientId.unlinkToDeath(this, 0);
+        RemoteControlClient client = mClients.get(clientId);
+        if(client != null)
+            client.release();
+        mClients.remove(clientId);
+    }
+
     public void binderDied() {
         /* Unfortunately the framework doesn't tell us _which_ binder
          * died. So we have to check all of them. */
 
-        for(IBinder clientId : mClients.keySet()) {
-            if(!clientId.isBinderAlive()) {
-                mClients.get(clientId).unregister();
-                mClients.remove(clientId);
+        synchronized (RemoteControlService.mCondVar) {
+            for(IBinder clientId : mClients.keySet()) {
+                if(!clientId.isBinderAlive()) {
+                    Log.println(Log.INFO, TAG, "binderDied: nuking " + clientId);
+                    cleanupClient(clientId);
+                    /* Need to return immediately as mClients will have been modified */
+                    return;
+                }
             }
         }
     }
 
-    /* Binder API */
+    private AuthorisationResult promptForAuthorisation(String pkgName) {
 
-    private class BinderInterface extends IRemoteControl.Stub implements IRotationWatcher {
-
-        public synchronized int registerRemoteController(IRemoteControlClient obj) throws SecurityException, RemoteException {
-            IBinder clientId = obj.asBinder();
+        Log.println(Log.INFO, TAG, "RemoteControl: authorisation prompt requested for "+pkgName);
 
             /* Perform security checks here and refuse to register the
              * client if it's not permitted to use the service */
@@ -222,107 +384,243 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
             try {
                 dpm.ensureCallerHasPolicy(DeviceAdminInfo.USES_POLICY_REMOTE_CONTROL);
             } catch(SecurityException e) {
-                return RemoteControl.RC_DEVICE_ADMIN_NOT_ENABLED;
+                return AuthorisationResult.DENIED;
             }
 
-            /* The client is authorised - add it to the registered clients
-             * map */
+            return AuthorisationResult.APPROVED;
+    }
 
-            if(mClients.containsKey(clientId)) {
-                Log.println(Log.ERROR, TAG, "Already registered: " + clientId);
-                throw new IllegalStateException("Already registered: " + clientId);
-            } else {
-                RemoteControlClient client = new RemoteControlClient();
+    private static FileDescriptor MemoryFile_getFileDescriptor(MemoryFile mf) {
+        // The method that we want to use is marked as '@hide' which
+        // means it isn't available to .apk packages, even ones that
+        // are compiled as part of the platform build.
 
-                mClients.put(clientId, client);
+        // So we use reflection, to avoid having to modify platform
+        // core code.
 
-                try {
-                    clientId.linkToDeath(RemoteControlService.this, 0);
-                } catch(Exception e) {
-                    Log.println(Log.ERROR, TAG, "RemoteControl: exception");
-                    e.printStackTrace();
+        try {
+            Class<?> cls = Class.forName("android.os.MemoryFile");
+            Method meth = cls.getMethod("getFileDescriptor",
+                                        new Class[] {});
+            FileDescriptor fd = (FileDescriptor) meth.invoke(mf,
+                                                             new Object[] {});
+            return fd;
+        } catch(Throwable e) {
+            Log.println(Log.ERROR, TAG, "RemoteControl: reflection failure");
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    private static String getHexString(byte[] b) {
+        StringBuilder result = new StringBuilder();
+        for (int i=0; i < b.length; i++) {
+            result.append(
+                          Integer.toString( ( b[i] & 0xff ) + 0x100, 16).substring( 1 ));
+        }
+        return result.toString();
+    }
+
+    private static Set<String> getSystemSigningKeys(Context ctx) {
+        PackageManager pm = ctx.getPackageManager();
+
+        Set<String> results = new HashSet<String>();
+
+        try {
+            PackageInfo pi = pm.getPackageInfo("android", pm.GET_SIGNATURES);
+            if(pi != null) {
+                int i;
+
+                Log.i(TAG, "Found " + pi.signatures.length + " system signing keys");
+
+                for(i=0; i<pi.signatures.length; i++) {
+                    MessageDigest md = MessageDigest.getInstance("SHA1");
+                    md.update(pi.signatures[i].toByteArray());
+                    String key = getHexString(md.digest());
+                    results.add(key);
+                    Log.i(TAG, "Key " + i + " is " + key);
                 }
-            }
 
-            return 0;
+            }
+        } catch(NoSuchAlgorithmException e) {
+            Log.e(TAG, "Failed to find algorithm for system signing keys");
+        } catch(PackageManager.NameNotFoundException e) {
+            Log.e(TAG, "Failed to find package for system signing keys");
         }
 
-        public synchronized void unregisterRemoteController(IRemoteControlClient obj) {
-            IBinder clientId = obj.asBinder();
-            RemoteControlClient client = checkClient(obj);
+        return results;
+    }
 
-            client.unregister();
-            mClients.remove(clientId);
+    /* Binder API */
+    private class BinderInterface extends IRemoteControl.Stub {
+
+        public int registerRemoteController(IRemoteControlClient obj) throws SecurityException, RemoteException {
+            synchronized (RemoteControlService.mCondVar) {
+                if (mNativeLibraryLoadFailed) {
+                    Log.e(TAG, "Failed to load native library, failing request to register controller");
+                    return RemoteControl.RC_SERVICE_LACKING_OTHER_OS_FACILITIES;
+                }
+
+                // Shortly, we're going to start doing lots of security checks
+                // to ensure whether the caller has the rights to remote control.
+                // But before we do that, let's check whether we ourselves have
+                // the right!
+                PackageManager p = getApplicationContext().getPackageManager();
+                if (p.checkPermission("android.permission.READ_FRAME_BUFFER", getPackageName()) != PackageManager.PERMISSION_GRANTED ||
+                        p.checkPermission("android.permission.INJECT_EVENTS", getPackageName()) != PackageManager.PERMISSION_GRANTED) {
+                    Log.e(TAG, "RemoteControlService hasn't been signed by the right certificate for this device.");
+                    try {
+                        PackageInfo pi = p.getPackageInfo(getPackageName(), p.GET_SIGNATURES);
+                        if(pi.signatures != null)
+                            for(Signature s : pi.signatures) {
+                                MessageDigest md = MessageDigest.getInstance("SHA1");
+                                md.update(s.toByteArray());
+                                String key = getHexString(md.digest());
+                                Log.e(TAG, "Package signed with key: " + key);
+                            }
+                        getSystemSigningKeys(getApplicationContext());
+
+                    } catch(NoSuchAlgorithmException e) {
+                        Log.e(TAG, "Failed to find algorithm for package signing keys");
+                    } catch (PackageManager.NameNotFoundException e) {
+                        Log.e(TAG, "Failed to retrieve package signing key");
+                    }
+                    return RemoteControl.RC_SERVICE_ITSELF_LACKING_PERMISSIONS;
+                }
+
+                IBinder clientId = obj.asBinder();
+
+                /* Perform security checks here and refuse to register the
+                 * client if it's not permitted to use the service */
+
+                String[] pkgs = getPackageManager().getPackagesForUid(getCallingUid());
+
+                // TODO: what if there are more than one? For now just
+                // disallow it
+                if(pkgs.length != 1)
+                    throw new SecurityException("Not authorised for remote control");
+
+                String pkgName = pkgs[0];
+                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getBaseContext());
+                boolean isAuthorised = prefs.getBoolean("is_authorised_" + pkgName, false);
+
+                if(!isAuthorised) {
+                    AuthorisationResult rv = promptForAuthorisation(pkgName);
+
+                    if(rv != AuthorisationResult.APPROVED) {
+                        throw new SecurityException("Not authorised for remote control");
+                    }
+                }
+
+                SharedPreferences.Editor edit = prefs.edit();
+                edit.putBoolean("is_authorised_" + pkgName, true);
+                edit.commit();
+
+                /* The client is authorised - add it to the registered clients
+                 * map */
+
+                if(mClients.containsKey(clientId)) {
+                    Log.println(Log.ERROR, TAG, "Already registered: " + clientId);
+                    throw new IllegalStateException("Already registered: " + clientId);
+                } else {
+                    RemoteControlClient client = new RemoteControlClient(obj);
+
+                    mClients.put(clientId, client);
+
+                    try {
+                        clientId.linkToDeath(RemoteControlService.this, 0);
+                    } catch(Exception e) {
+                        Log.println(Log.ERROR, TAG, "RemoteControl: exception");
+                        e.printStackTrace();
+                    }
+                }
+
+                return 0;
+            }
+        }
+
+        public void unregisterRemoteController(IRemoteControlClient obj) {
+            synchronized (RemoteControlService.mCondVar) {
+                IBinder clientId = obj.asBinder();
+                RemoteControlClient client = checkClient(obj);
+                client.release();
+                cleanupClient(clientId);
+
+                // In an ideal world, we would also here check to see if there
+                // is an authorisation prompt visible, and hide it.
+                // This could occur if the VNC server happens to 'reset'
+                // or 'disconnect' whilst the user is being prompted.
+
+                // But cancelling the notification isn't simple. It's
+                // complicated because we don't know whether it would be at
+                // the stage of being a mere notification, or if it had actually
+                // progressed as far as being an Activity.
+
+                // We're therefore not going to attempt to cancel pending
+                // authorisation attempts.
+
+                // We could go half-way, and iterate through mPendingNotifications
+                // (and the currently displayed notification), fill in mResult
+                // and mCondVar.notifyAll(). This would kick the relevant thread
+                // out of its wait, but it wouldn't actually do anything to hide
+                // any notifications or activities, so it doesn't seem worth
+                // the benefit.
+            }
         }
 
         public RemoteControl.DeviceInfo getDeviceInfo(IRemoteControlClient obj) {
-            RemoteControlClient client = checkClient(obj);
-            return buildDeviceInfo();
+            synchronized (RemoteControlService.mCondVar) {
+                RemoteControlClient client = checkClient(obj);
+                return client.getDeviceInfo();
+            }
         }
 
-        public synchronized MemoryFile getFrameBuffer(IRemoteControlClient obj, int pixfmt) throws IOException {
-            RemoteControlClient client = checkClient(obj);
-
-            if(client.nativeID == 0) {
-                client.registerScreenshotClient(pixfmt);
-                return client.mFrameBuffer;
-            } else return null;
-        }
-
-        public synchronized void releaseFrameBuffer(IRemoteControlClient obj) {
-            RemoteControlClient client = checkClient(obj);
-
-            client.closing = true;
-
-            if(client.nativeID != 0) {
-                try {
-                    client.nSignal();
-                    client.unregisterScreenshotClient();
-
-                } catch(Exception e) {
-                    Log.println(Log.ERROR, TAG, "RemoteControl: exception");
-                    e.printStackTrace();
-                }
+        public void releaseFrameBuffer(IRemoteControlClient obj) {
+            synchronized (RemoteControlService.mCondVar) {
+                RemoteControlClient client = checkClient(obj);
+                client.releaseFrameBuffer();
             }
         }
 
         public int grabScreen(IRemoteControlClient obj, boolean incremental) {
-            RemoteControlClient client = checkClient(obj);
-
-            if((client.nativeID == 0) || client.closing)
-                return -1;
-
-            int rv = client.grabScreen(incremental);
-
-            if((client.nativeID == 0) || client.closing)
-                return -1;
-
-            return rv;
+            synchronized (RemoteControlService.mCondVar) {
+                RemoteControlClient client = checkClient(obj);
+                return client.grabScreen(incremental);
+            }
         }
 
         public void injectKeyEvent(IRemoteControlClient obj, KeyEvent event) {
-            RemoteControlClient client = checkClient(obj);
-
-            try {
-                long previousIdentity = clearCallingIdentity();
-                mWindowManager.injectKeyEvent(event, true);
-                restoreCallingIdentity(previousIdentity);
-            } catch(Exception e) {
-                Log.println(Log.ERROR, TAG, "RemoteControl: exception");
-                e.printStackTrace();
+            synchronized (RemoteControlService.mCondVar) {
+                RemoteControlClient client = checkClient(obj);
+                client.injectKeyEvent(event);
             }
         }
 
         public void injectMotionEvent(IRemoteControlClient obj, MotionEvent event) {
-            RemoteControlClient client = checkClient(obj);
+            synchronized (RemoteControlService.mCondVar) {
+                RemoteControlClient client = checkClient(obj);
+                client.injectMotionEvent(event);
+            }
+        }
 
-            try {
-                long previousIdentity = clearCallingIdentity();
-                mWindowManager.injectPointerEvent(event, false);
-                restoreCallingIdentity(previousIdentity);
-            } catch(Exception e) {
-                Log.println(Log.ERROR, TAG, "RemoteControl: exception");
-                e.printStackTrace();
+        /**
+         * @deprecated This is no longer used. See comments in {@link RemoteControl}.
+         */
+        public boolean verifyPermissions() {
+            return true;
+        }
+
+        public Bundle customRequest(String extensionType, Bundle payload) {
+            /* This version of the Remote Control Service does not support any
+             * extensions at the present time.
+             */
+            return null;
+        }
+
+        public Bundle customClientRequest(IRemoteControlClient obj, String extensionType, Bundle payload) {
+            synchronized (RemoteControlService.mCondVar) {
+                RemoteControlClient client = checkClient(obj);
+                return client.customClientRequest(extensionType, payload);
             }
         }
 
@@ -334,48 +632,35 @@ public class RemoteControlService extends Service implements IBinder.DeathRecipi
             switch (code)
             {
             case RemoteControl.TRANSACTION_getFrameBuffer: {
-                data.enforceInterface("android.os.IRemoteControl");
-                IBinder b = data.readStrongBinder();
-                int pixfmt = data.readInt();
-                IRemoteControlClient obj = IRemoteControlClient.Stub.asInterface(b);
-                try {
-                    MemoryFile fb = this.getFrameBuffer(obj, pixfmt);
-                    if(fb != null) {
-                        reply.writeInt(0);
-                        reply.writeFileDescriptor(fb.getFileDescriptor());
-                        reply.writeInt(fb.length());
-                    } else {
-                        reply.writeInt(-1);
+                synchronized (RemoteControlService.mCondVar) {
+                    data.enforceInterface("android.os.IRemoteControl");
+                    IBinder b = data.readStrongBinder();
+                    int pixfmt = data.readInt();
+                    IRemoteControlClient obj = IRemoteControlClient.Stub.asInterface(b);
+                    RemoteControlClient client = checkClient(obj);
+
+                    try {
+                        MemoryFile mf = client.getFrameBuffer(pixfmt);
+                        if(mf != null) {
+                            reply.writeInt(0);
+                            reply.writeFileDescriptor(MemoryFile_getFileDescriptor(mf));
+                            reply.writeInt(mf.length());
+                            reply.writeNoException();
+                        } else {
+                            reply.writeInt(-1);
+                        }
+                    } catch(Exception e) {
+                        Log.println(Log.ERROR, TAG, "RemoteControl: exception");
+                        e.printStackTrace();
+                        Log.println(Log.ERROR, TAG, "RemoteControl: writing exception to reply");
+                        reply.writeException(e);
                     }
-                    reply.writeNoException();
-                } catch(Exception e) {
-                    Log.println(Log.ERROR, TAG, "RemoteControl: exception");
-                    e.printStackTrace();
-                    reply.writeException(e);
+                    return true;
                 }
-                return true;
             }
             }
             return super.onTransact(code, data, reply, flags);
         }
-
-        /* Callback from the window manager service when the screen rotation changes */
-        public void onRotationChanged(int rotation) {
-            for(IBinder clientId : mClients.keySet()) {
-                IRemoteControlClient obj;
-
-                obj = IRemoteControlClient.Stub.asInterface(clientId);
-
-                try {
-                    obj.deviceInfoChanged();
-                } catch(Exception e) {
-                    Log.println(Log.ERROR, TAG, "RemoteControl: exception");
-                    e.printStackTrace();
-                }
-            }
-        }
-
-
     }
 
     private BinderInterface mInterface = new BinderInterface();
