@@ -145,7 +145,7 @@ public final class DeviceAdminInfo implements Parcelable {
      * <p>To control this policy, the device admin must have a "remote-control"
      * tag in the "uses-policies" section of its meta-data.
      */
-    public static final int USES_POLICY_REMOTE_CONTROL = 5;
+    public static final int USES_POLICY_REMOTE_CONTROL = 9;
 
     /** @hide */
     public static class PolicyInfo {
@@ -170,9 +170,6 @@ public final class DeviceAdminInfo implements Parcelable {
         sPoliciesDisplayOrder.add(new PolicyInfo(USES_POLICY_WIPE_DATA, "wipe-data",
                 com.android.internal.R.string.policylab_wipeData,
                 com.android.internal.R.string.policydesc_wipeData));
-        sPoliciesDisplayOrder.add(new PolicyInfo(USES_POLICY_REMOTE_CONTROL, "remote-control",
-                com.android.internal.R.string.policylab_remoteControl,
-                com.android.internal.R.string.policydesc_remoteControl));
         sPoliciesDisplayOrder.add(new PolicyInfo(USES_POLICY_RESET_PASSWORD, "reset-password",
                 com.android.internal.R.string.policylab_resetPassword,
                 com.android.internal.R.string.policydesc_resetPassword));
@@ -197,6 +194,9 @@ public final class DeviceAdminInfo implements Parcelable {
         sPoliciesDisplayOrder.add(new PolicyInfo(USES_POLICY_DISABLE_CAMERA, "disable-camera",
                 com.android.internal.R.string.policylab_disableCamera,
                 com.android.internal.R.string.policydesc_disableCamera));
+        sPoliciesDisplayOrder.add(new PolicyInfo(USES_POLICY_REMOTE_CONTROL, "remote-control",
+                com.android.internal.R.string.policylab_remoteControl,
+                com.android.internal.R.string.policydesc_remoteControl));
 
         for (int i=0; i<sPoliciesDisplayOrder.size(); i++) {
             PolicyInfo pi = sPoliciesDisplayOrder.get(i);
