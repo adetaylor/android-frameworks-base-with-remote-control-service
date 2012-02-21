@@ -168,15 +168,11 @@ public class RemoteControl
 
         mCtx = ctx;
 
-        mServiceInterface = getServiceInterface();
-    }
-
-    private IRemoteControl getServiceInterface() {
-
         int rv;
+        IRemoteControl newServiceInterface = null;
 
         try {
-            IRemoteControl newServiceInterface = (IRemoteControl)mCtx.getSystemService("remote_control");
+            newServiceInterface = (IRemoteControl)mCtx.getSystemService("remote_control");
             rv = newServiceInterface.registerRemoteController(mCallbackHandler);
         } catch(SecurityException e) {
             rv = RC_PERMISSION_DENIED;
@@ -191,7 +187,6 @@ public class RemoteControl
             if (mCallbackHandler != null)
                 mCallbackHandler.mListener.connectionStatus(rv);
         }
-        return newServiceInterface;
     }
 
     /**
