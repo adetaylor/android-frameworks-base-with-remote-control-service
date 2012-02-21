@@ -32,9 +32,6 @@ interface IRemoteControl
 
     RemoteControl.DeviceInfo getDeviceInfo(IRemoteControlClient client);
 
-    int registerRemoteController(IRemoteControlClient client);
-    void unregisterRemoteController(IRemoteControlClient client);
-
     void injectKeyEvent(IRemoteControlClient obj, in KeyEvent event);
     void injectMotionEvent(IRemoteControlClient obj, in MotionEvent event);
 
