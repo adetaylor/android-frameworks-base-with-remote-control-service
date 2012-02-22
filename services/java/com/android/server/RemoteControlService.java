@@ -79,7 +79,7 @@ public class RemoteControlService extends IRemoteControl.Stub implements IBinder
      */
     private static Object mCondVar = new Object();
 
-    public void RemoteControlService(Context context) {
+    public RemoteControlService(Context context) {
 		mContext = context;
         WindowManager wm = (WindowManager)mContext.getSystemService(Context.WINDOW_SERVICE);
         mDisplay = wm.getDefaultDisplay();
