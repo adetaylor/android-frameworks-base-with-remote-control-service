@@ -166,21 +166,20 @@ static JNINativeMethod method_table[] = {
 
 jint register_android_server_RemoteControlService(JNIEnv *env)
 {
-    jclass clazz = env->FindClass("com/realvnc/android/remote/RemoteControlService$RemoteControlClient");
+    // RemoteControlClient
+
+    jclass clazz = env->FindClass("com/android/server/RemoteControlService$RemoteControlClient");
+    LOG_FATAL_IF(!clazz, "Unable to find RemoteControlClient class");
+    if (!clazz) {
+      return -1;
+    }
 
     int res = env->RegisterNatives(clazz,
                                    method_table, 
                                    sizeof(method_table) / sizeof(method_table[0]));
     LOG_FATAL_IF(res < 0, "Unable to register native methods.");
 
-    // RemoteControlClient
-
-    jobject obj = env->FindClass("com/android/server/RemoteControlService$RemoteControlClient");
-    LOG_FATAL_IF(!obj, "Unable to find RemoteControlClient class");
-    if (!obj) {
-      return -1;
-    }
-    gRemoteControlClientClassInfo.clazz = (jclass)env->NewGlobalRef(obj);
+    gRemoteControlClientClassInfo.clazz = (jclass)env->NewGlobalRef(clazz);
 
     gRemoteControlClientClassInfo.nativeID = env->GetFieldID(gRemoteControlClientClassInfo.clazz,
                                                              "nativeID", "I");
@@ -188,13 +187,13 @@ jint register_android_server_RemoteControlService(JNIEnv *env)
 
     // MemoryFile
 
-    obj = env->FindClass("android/os/MemoryFile");
-    LOG_FATAL_IF(!obj, "Unable to find MemoryFile class");
-    if (!obj) {
+    clazz = env->FindClass("android/os/MemoryFile");
+    LOG_FATAL_IF(!clazz, "Unable to find MemoryFile class");
+    if (!clazz) {
       return -1;
     }
 
-    gMemoryFileClassInfo.clazz = (jclass)env->NewGlobalRef(obj);
+    gMemoryFileClassInfo.clazz = (jclass)env->NewGlobalRef(clazz);
 
     gMemoryFileClassInfo.mAddress = env->GetFieldID(gMemoryFileClassInfo.clazz,
                                                     "mAddress", "I");
