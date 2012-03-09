@@ -15158,6 +15158,7 @@ package android.os {
     method public android.os.RemoteControl.DeviceInfo getDeviceInfo() throws android.os.RemoteControl.ServiceExitedException;
     method public deprecated android.os.MemoryFile getFrameBuffer(int, boolean) throws android.os.RemoteControl.FrameBufferUnavailableException, android.os.RemoteControl.ServiceExitedException;
     method public android.os.RemoteControl.MemoryAreaInformation getFrameBufferFd(int, boolean) throws android.os.RemoteControl.FrameBufferUnavailableException, android.os.RemoteControl.ServiceExitedException;
+    method public static android.content.Intent getIntentForConfirmation();
     method public static android.os.RemoteControl getRemoteControl(android.content.Context, android.os.RemoteControl.ICallbacks) throws android.os.RemoteControl.RemoteControlException, java.lang.SecurityException;
     method public void grabScreen(boolean, android.graphics.Rect) throws android.os.RemoteControl.DisconnectedException, android.os.RemoteControl.IncrementalUpdatesUnavailableException, android.os.RemoteControl.ServiceExitedException;
     method public void injectKeyEvent(android.view.KeyEvent) throws android.os.RemoteControl.ServiceExitedException;
