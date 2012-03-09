@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2011 The Android Open Source Project
+
+     Licensed under the Apache License, Version 2.0 (the "License");
+     you may not use this file except in compliance with the License.
+     You may obtain a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+     Unless required by applicable law or agreed to in writing, software
+     distributed under the License is distributed on an "AS IS" BASIS,
+     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+     See the License for the specific language governing permissions and
+     limitations under the License.
+-->
+
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+
+    <!-- Dialog title to identify the request from a VPN application. [CHAR LIMIT=60] -->
+    <string name="prompt"><xliff:g id="app">%s</xliff:g>
+        attempts to control this device.
+    </string>
+
+    <!-- Dialog message to warn about the risk of using a remote control application. [CHAR LIMIT=NONE] -->
+    <string name="warning">This application is attempting to take control of your device.
+        This application may access any of your data, impersonate you,
+        or do anything else that you can do when using your phone. Are
+        you sure that you want to allow remote control?
+        <b>Do NOT accept unless you trust the application.</b> Otherwise,
+        you run the risk of having your device compromised by malicious
+        software.
+    </string>
+
+    <!-- Checkbox label to accept the request from a remote control application. [CHAR LIMIT=60] -->
+    <string name="accept">I trust this application.</string>
+
+    <!-- Button label to configure the current remote control session. [CHAR LIMIT=20] -->
+    <string name="configure">Configure</string>
+    <!-- Button label to disconnect the current remote control session. [CHAR LIMIT=20] -->
+    <string name="disconnect">Disconnect</string>
+
+    <!-- Label for the name of the current remote control session. [CHAR LIMIT=20] -->
+    <string name="session">Session:</string>
+    <!-- Label for the duration of the current remote control session. [CHAR LIMIT=20] -->
+    <string name="duration">Duration:</string>
+
+    <!-- Dummy string for a blank value. [CHAR LIMIT=40] -->
+    <string name="blank_value">--</string>
+</resources>
