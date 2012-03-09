@@ -69,8 +69,6 @@ interface IDevicePolicyManager {
     long getMaximumTimeToLock(in ComponentName who);
     
     void lockNow();
-
-    void ensureCallerHasPolicy(int reqPolicy);
     
     void wipeData(int flags);
 

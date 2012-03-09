@@ -547,14 +547,6 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
         }
     }
 
-    /* Throw a SecurityException if the caller doesn't have the
-     * specified policy. */
-    public void ensureCallerHasPolicy(int reqPolicy) throws SecurityException {
-        synchronized(this) {
-            getActiveAdminForCallerLocked(null, reqPolicy);
-        }
-    }
-
     void sendAdminCommandLocked(ActiveAdmin admin, String action) {
         sendAdminCommandLocked(admin, action, null);
     }
