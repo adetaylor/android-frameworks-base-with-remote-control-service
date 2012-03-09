@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (C) 2010-2012 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -544,6 +544,14 @@ public class DevicePolicyManagerService extends IDevicePolicyManager.Stub {
             }
             throw new SecurityException("No active admin owned by uid "
                     + Binder.getCallingUid() + " for policy #" + reqPolicy);
+        }
+    }
+
+    /* Throw a SecurityException if the caller doesn't have the
+     * specified policy. */
+    public void ensureCallerHasPolicy(int reqPolicy) throws SecurityException {
+        synchronized(this) {
+            getActiveAdminForCallerLocked(null, reqPolicy);
         }
     }
 

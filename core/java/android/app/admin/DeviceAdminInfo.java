@@ -138,6 +138,15 @@ public final class DeviceAdminInfo implements Parcelable {
      */
     public static final int USES_POLICY_DISABLE_CAMERA = 8;
 
+    /**
+     * A type of policy that this device admin can use: able to take
+     * control of the device via the RemoteControlService.
+     *
+     * <p>To control this policy, the device admin must have a "remote-control"
+     * tag in the "uses-policies" section of its meta-data.
+     */
+    public static final int USES_POLICY_REMOTE_CONTROL = 9;
+
     /** @hide */
     public static class PolicyInfo {
         public final int ident;
@@ -185,6 +194,9 @@ public final class DeviceAdminInfo implements Parcelable {
         sPoliciesDisplayOrder.add(new PolicyInfo(USES_POLICY_DISABLE_CAMERA, "disable-camera",
                 com.android.internal.R.string.policylab_disableCamera,
                 com.android.internal.R.string.policydesc_disableCamera));
+        sPoliciesDisplayOrder.add(new PolicyInfo(USES_POLICY_REMOTE_CONTROL, "remote-control",
+                com.android.internal.R.string.policylab_remoteControl,
+                com.android.internal.R.string.policydesc_remoteControl));
 
         for (int i=0; i<sPoliciesDisplayOrder.size(); i++) {
             PolicyInfo pi = sPoliciesDisplayOrder.get(i);
@@ -377,7 +389,7 @@ public final class DeviceAdminInfo implements Parcelable {
      * {@link #USES_POLICY_RESET_PASSWORD}, {@link #USES_POLICY_FORCE_LOCK},
      * {@link #USES_POLICY_WIPE_DATA},
      * {@link #USES_POLICY_EXPIRE_PASSWORD}, {@link #USES_ENCRYPTED_STORAGE},
-     * {@link #USES_POLICY_DISABLE_CAMERA}.
+     * {@link #USES_POLICY_DISABLE_CAMERA}, {@link #USES_POLICY_REMOTE_CONTROL}.
      */
     public boolean usesPolicy(int policyIdent) {
         return (mUsesPolicies & (1<<policyIdent)) != 0;

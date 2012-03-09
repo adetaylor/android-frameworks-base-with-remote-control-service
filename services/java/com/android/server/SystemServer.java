@@ -111,6 +111,7 @@ class ServerThread extends Thread {
 
         LightsService lights = null;
         PowerManagerService power = null;
+        RemoteControlService remote = null;
         BatteryService battery = null;
         AlarmManagerService alarm = null;
         NetworkManagementService networkManagement = null;
@@ -544,6 +545,14 @@ class ServerThread extends Thread {
                             new SamplingProfilerService(context));
             } catch (Throwable e) {
                 reportWtf("starting SamplingProfiler Service", e);
+            }
+
+            try {
+                Slog.i(TAG, "RemoteControlService");
+                remote = new RemoteControlService(context);
+                ServiceManager.addService("remote_control", remote);
+            } catch (Throwable e) {
+                reportWtf("starting RemoteControlService service", e);
             }
 
             try {

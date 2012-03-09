@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 The Android Open Source Project
+ * Copyright (C) 2009-2012 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ int register_android_server_UsbHostManager(JNIEnv* env);
 int register_android_server_VibratorService(JNIEnv* env);
 int register_android_server_SystemServer(JNIEnv* env);
 int register_android_server_location_GpsLocationProvider(JNIEnv* env);
+int register_android_server_RemoteControlService(JNIEnv* env);
 int register_android_server_connectivity_Vpn(JNIEnv* env);
 };
 
@@ -60,6 +61,7 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved)
     register_android_server_VibratorService(env);
     register_android_server_SystemServer(env);
     register_android_server_location_GpsLocationProvider(env);
+    register_android_server_RemoteControlService(env);
     register_android_server_connectivity_Vpn(env);
 
     return JNI_VERSION_1_4;
