@@ -105,7 +105,7 @@ public class ConfirmDialog extends Activity implements CompoundButton.OnCheckedC
     @Override
     public void onClick(DialogInterface dialog, int which) {
         try {
-            if (which == AlertDialog.BUTTON_POSITIVE && mService.prepareVpn(null, mPackage)) {
+            if (which == AlertDialog.BUTTON_POSITIVE && authorisePackage(mPackage)) {
                 setResult(RESULT_OK);
             }
         } catch (Exception e) {
@@ -116,5 +116,13 @@ public class ConfirmDialog extends Activity implements CompoundButton.OnCheckedC
     @Override
     public void onDismiss(DialogInterface dialog) {
         finish();
+    }
+
+    private void authorisePackage(String packageName) {
+        // TODO authorise the calling package using code along the lines
+        // of the following:
+        //IRemoteControl service = IRemoteControl.Stub.asInterface(
+                    //ServiceManager.getService(Context.REMOTE_CONTROL_SERVICE));
+        //service.authoriseRemoteControl(packageName);
     }
 }
