@@ -60,7 +60,11 @@ import android.os.RemoteControl;
 /* Server-side implementation of the remote control service.
  *
  * This code runs in the system server rather than the client process,
- * so it is responsible for enforcing all security restrictions. */
+ * so it is responsible for enforcing all security restrictions.
+ *
+ * At the time of writing this code is designed to support multiple clients;
+ * however in fact that's probably more complexity than we need in AOSP.
+ * It may be simplified to support only one client. */
 
 public class RemoteControlService extends IRemoteControl.Stub implements IBinder.DeathRecipient
 {
@@ -70,9 +74,12 @@ public class RemoteControlService extends IRemoteControl.Stub implements IBinder
     private Display mDisplay;
     private IWindowManager mWindowManager;
 
+    /** The one package which is allowed to use remote control at this time. */
+    private String mAllowedPackage;
+
     /**
      * Big global lock for everything relating to the remote control service.
-     * Absolutely everything should be locked on this - see MOB-5499 for justification.
+     * Absolutely everything should be locked on this.
      * This does mean that some method calls might take a long time waiting for others
      * to complete, but we've decided that the frequency of multiple clients trying to
      * use RemoteControlService is so slim that a big global lock is acceptable.
@@ -324,10 +331,16 @@ public class RemoteControlService extends IRemoteControl.Stub implements IBinder
             /* Perform security checks here and refuse to register the
              * client if it's not permitted to use the service */
 
-            IDevicePolicyManager dpm = IDevicePolicyManager.Stub.asInterface(
-                ServiceManager.getService(Context.DEVICE_POLICY_SERVICE));
-            /* Will throw SecurityException if remote control not permitted */
-            dpm.ensureCallerHasPolicy(DeviceAdminInfo.USES_POLICY_REMOTE_CONTROL);
+            String[] pkgs = getPackageManager().getPackagesForUid(getCallingUid());
+
+            // TODO: what if there are more than one? For now just
+            // disallow it
+            if(pkgs.length != 1)
+                throw new SecurityException("Not authorised for remote control");
+
+            String pkgName = pkgs[0];
+            if (!pkgName.equals(mAllowedPackage)
+                throw new SecurityException("Not authorised for remote control");
 
             /* The client is authorised - add it to the registered clients
              * map */
@@ -415,6 +428,19 @@ public class RemoteControlService extends IRemoteControl.Stub implements IBinder
             RemoteControlClient client = checkClient(obj);
             return client.customClientRequest(extensionType, payload);
         }
+    }
+
+    /**
+     * Authorise a remote controlled. Can be called only by system code.
+     * Typically this is called by the RemoteControlDialogs package.
+     */
+    public void authoriseRemoteController(String packageName) {
+        // Only system user can authorise remote control
+        if (Binder.getCallingUid() != Process.SYSTEM_UID) {
+            throw new SecurityException("Unauthorized Caller");
+        }
+
+        mAllowedPackage = packageName;
     }
 
     /* Custom Binder transaction implementation for getFrameBuffer(),

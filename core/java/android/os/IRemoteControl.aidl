@@ -56,4 +56,7 @@ interface IRemoteControl
     Bundle customRequest(String extensionName, in Bundle payload);
 
     Bundle customClientRequest(IRemoteControlClient client, String extensionName, in Bundle payload);
+
+    /* Can be called only by the system user. */
+    void authoriseRemoteController(String packageName);
 }

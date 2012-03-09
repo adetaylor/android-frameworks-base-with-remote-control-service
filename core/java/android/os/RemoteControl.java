@@ -31,14 +31,11 @@ import android.os.IRemoteControlClient;
  * be used for taking screenshots, or for implementing VNC servers or
  * other remote control applications.
  *
- * <p>To start using remote control, call {@link #getRemoteControl(Context, ICallbacks)}
+ * <p>To start using remote control, first execute the intent returned
+ * by {@link #getIntentForConfirmation} and wait for a response from the
+ * user. If the result was {@link Activity#RESULT_OK} then the
+ * application can call {@link #getRemoteControl(Context, ICallbacks)}
  * to create a RemoteControl object.</p>
- *
- * <p>To use this class, the user must explicitly authorise your
- * application. The remote control service is considered to be too
- * dangerous to expose via normal Android permissions as it would
- * allow a piece of malware to gain complete control over the device
- * and do anything that the user can do.</p>
  */
 
 /* Client-side implementation of the remote control service.
@@ -872,4 +869,20 @@ public class RemoteControl
             throw new ServiceExitedException();
         }
     }
+
+    /**
+     * Returns an intent which you can use to ask for your application to be authorised
+     * for remote control. The application should launch the
+     * activity using {@link Activity#startActivityForResult} to get itself
+     * authorised. The activity may pop up a dialog to require user action, and
+     * the result will come back via its {@link Activity#onActivityResult}.
+     * If the result is {@link Activity#RESULT_OK}, the application becomes
+     * prepared and may then use {@link #getRemoteControl}.
+     */
+    public static Intent getIntentForConfirmation() {
+        Intent intent = new Intent();
+        intent.setClassName("com.android.remotecontroldialogs", "com.android.remotecontroldialogs.ConfirmDialog");
+        return intent;
+    }
+
 }
