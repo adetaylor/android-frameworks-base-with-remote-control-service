@@ -105,7 +105,8 @@ public class ConfirmDialog extends Activity implements CompoundButton.OnCheckedC
     @Override
     public void onClick(DialogInterface dialog, int which) {
         try {
-            if (which == AlertDialog.BUTTON_POSITIVE && authorisePackage(mPackage)) {
+            if (which == AlertDialog.BUTTON_POSITIVE) {
+                authorisePackage(mPackage);
                 setResult(RESULT_OK);
             }
         } catch (Exception e) {

@@ -13,6 +13,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.graphics.Rect;
 import android.graphics.Region;
+import android.app.Activity;
 import android.os.IBinder;
 import android.os.MemoryFile;
 import android.os.Parcel;

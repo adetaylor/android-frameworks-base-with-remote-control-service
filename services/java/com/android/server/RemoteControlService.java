@@ -38,11 +38,13 @@ import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.Region;
 import android.net.ConnectivityManager;
+import android.os.Binder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.MemoryFile;
 import android.os.Parcel;
+import android.os.Process;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.util.Log;
@@ -331,7 +333,7 @@ public class RemoteControlService extends IRemoteControl.Stub implements IBinder
             /* Perform security checks here and refuse to register the
              * client if it's not permitted to use the service */
 
-            String[] pkgs = getPackageManager().getPackagesForUid(getCallingUid());
+            String[] pkgs = mContext.getPackageManager().getPackagesForUid(getCallingUid());
 
             // TODO: what if there are more than one? For now just
             // disallow it
@@ -339,7 +341,7 @@ public class RemoteControlService extends IRemoteControl.Stub implements IBinder
                 throw new SecurityException("Not authorised for remote control");
 
             String pkgName = pkgs[0];
-            if (!pkgName.equals(mAllowedPackage)
+            if (!pkgName.equals(mAllowedPackage))
                 throw new SecurityException("Not authorised for remote control");
 
             /* The client is authorised - add it to the registered clients

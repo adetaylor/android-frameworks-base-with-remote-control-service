@@ -50,8 +50,8 @@ public class ManageDialog extends Activity implements Handler.Callback,
 
     private AlertDialog mDialog;
     private TextView mDuration;
-    private TextView mDataTransmitted;
-    private TextView mDataReceived;
+    //private TextView mDataTransmitted;
+    //private TextView mDataReceived;
 
     private Handler mHandler;
 
@@ -74,22 +74,24 @@ public class ManageDialog extends Activity implements Handler.Callback,
                     //ServiceManager.getService(Context.CONNECTIVITY_SERVICE));
 
             View view = View.inflate(this, R.layout.manage, null);
-            if (mConfig.session != null) {
-                ((TextView) view.findViewById(R.id.session)).setText(mConfig.session);
-            }
+            // TODO reinstate
+            //if (mConfig.session != null) {
+                //((TextView) view.findViewById(R.id.session)).setText(mConfig.session);
+            //}
             mDuration = (TextView) view.findViewById(R.id.duration);
-            mDataTransmitted = (TextView) view.findViewById(R.id.data_transmitted);
-            mDataReceived = (TextView) view.findViewById(R.id.data_received);
+            //mDataTransmitted = (TextView) view.findViewById(R.id.data_transmitted);
+            //mDataReceived = (TextView) view.findViewById(R.id.data_received);
 
             PackageManager pm = getPackageManager();
-            ApplicationInfo app = pm.getApplicationInfo(mConfig.user, 0);
-            mDialog = new AlertDialog.Builder(this)
-                    .setIcon(app.loadIcon(pm))
-                    .setTitle(app.loadLabel(pm))
-                    .setView(view)
-                    .setNeutralButton(R.string.disconnect, this)
-                    .setNegativeButton(android.R.string.cancel, this)
-                    .create();
+            // TODO reinstate
+            //ApplicationInfo app = pm.getApplicationInfo(mConfig.user, 0);
+            //mDialog = new AlertDialog.Builder(this)
+                    //.setIcon(app.loadIcon(pm))
+                    //.setTitle(app.loadLabel(pm))
+                    //.setView(view)
+                    //.setNeutralButton(R.string.disconnect, this)
+                    //.setNegativeButton(android.R.string.cancel, this)
+                    //.create();
 
             // TODO allow a 'configure intent' to lead back to the remote
             // control app
@@ -123,7 +125,8 @@ public class ManageDialog extends Activity implements Handler.Callback,
     public void onClick(DialogInterface dialog, int which) {
         try {
             if (which == AlertDialog.BUTTON_POSITIVE) {
-                mConfig.configureIntent.send();
+                // TODO reinstate
+                //mConfig.configureIntent.send();
             } else if (which == AlertDialog.BUTTON_NEUTRAL) {
                 // TODO - disconnect existing remote control session
                 //mService.prepareVpn(mConfig.user, VpnConfig.LEGACY_VPN);
@@ -144,11 +147,11 @@ public class ManageDialog extends Activity implements Handler.Callback,
         mHandler.removeMessages(0);
 
         if (mDialog.isShowing()) {
-            if (mConfig.startTime != 0) {
-                long seconds = (SystemClock.elapsedRealtime() - mConfig.startTime) / 1000;
-                mDuration.setText(String.format("%02d:%02d:%02d",
-                        seconds / 3600, seconds / 60 % 60, seconds % 60));
-            }
+            //if (mConfig.startTime != 0) {
+                //long seconds = (SystemClock.elapsedRealtime() - mConfig.startTime) / 1000;
+                //mDuration.setText(String.format("%02d:%02d:%02d",
+                        //seconds / 3600, seconds / 60 % 60, seconds % 60));
+            //}
 
             mHandler.sendEmptyMessageDelayed(0, 1000);
         }
